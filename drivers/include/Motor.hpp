@@ -57,6 +57,22 @@ public:
   };
 
   /**
+   * @brief Default IPROPI sense resistor (Ω).
+   *
+   * Board value: 100 Ω + 1.5 kΩ series chain = 1 600 Ω.
+   * Pass a different value to the constructor to tune for real-world tolerance.
+   */
+  static constexpr float kDefaultRIpropi = 1600.0f;
+
+  /**
+   * @brief Default DRV8874 IPROPI current mirror ratio (A/A).
+   *
+   * Fixed by the DRV8874 silicon: 1 : 2000.
+   * Exposed here so it can be overridden if a different sense topology is used.
+   */
+  static constexpr float kDefaultIpropGain = 2000.0f;
+
+  /**
    * @brief Construct a Motor driver instance.
    *
    * Both IN1 and IN2 must be PWM-output channels of the same TIM peripheral.
@@ -71,6 +87,9 @@ public:
    * @param faultPin      GPIO pin mask for the ~FAULT input pin.
    * @param ipropSlot     Slot index into g_adcBuf[] for this motor's IPROPI channel.
    *                      Use kSlotLeftIpropi or kSlotRightIpropi from AdcDma.hpp.
+   * @param rIpropi       IPROPI sense resistor value (Ω). Defaults to kDefaultRIpropi.
+   *                      Adjust to compensate for real-world resistor tolerances.
+   * @param ipropGain     DRV8874 current mirror ratio (A/A). Defaults to kDefaultIpropGain.
    */
   Motor(TIM_HandleTypeDef* pwmTimer,
         uint32_t           in1Channel,
@@ -79,7 +98,9 @@ public:
         uint16_t           pmodePin,
         GPIO_TypeDef*      faultPort,
         uint16_t           faultPin,
-        uint8_t            ipropSlot);
+        uint8_t            ipropSlot,
+        float              rIpropi   = kDefaultRIpropi,
+        float              ipropGain = kDefaultIpropGain);
 
   /**
    * @brief Initialise the motor driver.
@@ -157,6 +178,8 @@ private:
   GPIO_TypeDef*      m_faultPort;  ///< GPIO port for the ~FAULT input pin.
   uint16_t           m_faultPin;   ///< GPIO pin mask for the ~FAULT input pin.
   uint8_t            m_ipropSlot;  ///< Index into g_adcBuf[] for this motor's IPROPI.
+  float              m_rIpropi;    ///< IPROPI sense resistor value (Ω).
+  float              m_ipropGain;  ///< DRV8874 current mirror ratio (A/A).
 
   uint32_t           m_timerPeriod; ///< Cached ARR value for duty cycle scaling.
 };

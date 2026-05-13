@@ -11,11 +11,8 @@
 #include <algorithm>
 #include <cmath>
 
-// IPROPI sense resistor value (Ω) and DRV8874 current-sense gain (A/A)
-static constexpr float kRIpropi   = 620.0f;  ///< External sense resistor (Ω)
-static constexpr float kIpropGain = 2000.0f; ///< DRV8874 IPROPI current mirror ratio
-static constexpr float kVdda      = 3.3f;    ///< ADC reference voltage (V)
-static constexpr float kAdcMaxF   = 4095.0f; ///< 12-bit ADC full-scale (float)
+static constexpr float kVdda    = 3.3f;    ///< ADC reference voltage (V)
+static constexpr float kAdcMaxF = 4095.0f; ///< 12-bit ADC full-scale (float)
 
 Motor::Motor(TIM_HandleTypeDef* pwmTimer,
              uint32_t           in1Channel,
@@ -24,7 +21,9 @@ Motor::Motor(TIM_HandleTypeDef* pwmTimer,
              uint16_t           pmodePin,
              GPIO_TypeDef*      faultPort,
              uint16_t           faultPin,
-             uint8_t            ipropSlot)
+             uint8_t            ipropSlot,
+             float              rIpropi,
+             float              ipropGain)
   : m_pwmTimer(pwmTimer)
   , m_in1Channel(in1Channel)
   , m_in2Channel(in2Channel)
@@ -33,6 +32,8 @@ Motor::Motor(TIM_HandleTypeDef* pwmTimer,
   , m_faultPort(faultPort)
   , m_faultPin(faultPin)
   , m_ipropSlot(ipropSlot)
+  , m_rIpropi(rIpropi)
+  , m_ipropGain(ipropGain)
   , m_timerPeriod(0U)
 {}
 
@@ -120,9 +121,9 @@ int32_t Motor::readCurrentMilliamps()
   uint16_t raw = g_adcBuf[m_ipropSlot];
 
   // V_IPROPI (V) = (raw / 4095) × VDDA
-  // I_OUT    (A) = V_IPROPI × kIpropGain / kRIpropi
+  // I_OUT    (A) = V_IPROPI × m_ipropGain / m_rIpropi
   float vIpropi = (static_cast<float>(raw) / kAdcMaxF) * kVdda;
-  float iOut    = vIpropi * kIpropGain / kRIpropi;
+  float iOut    = vIpropi * m_ipropGain / m_rIpropi;
   return static_cast<int32_t>(iOut * 1000.0f); // convert A → mA
 }
 
