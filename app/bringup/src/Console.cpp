@@ -6,6 +6,7 @@
  ******************************************************************************/
 
 #include "Console.hpp"
+#include "stm32h5xx_hal.h"
 
 // CubeMX-generated USB CDC transmit function.
 // Declared here to avoid pulling in the full USB Device header tree.
@@ -15,6 +16,33 @@ extern "C" uint8_t CDC_Transmit_FS(uint8_t* Buf, uint16_t Len);
 #include <cstdio>
 #include <cstdarg>
 #include <cctype>
+
+// strcasecmp / strncasecmp are POSIX, not standard C++17.
+// Provide portable replacements using <cctype>.
+static int s_strcasecmp(const char* a, const char* b)
+{
+  while (*a && *b)
+  {
+    int diff = std::tolower(static_cast<unsigned char>(*a))
+             - std::tolower(static_cast<unsigned char>(*b));
+    if (diff != 0) return diff;
+    ++a; ++b;
+  }
+  return std::tolower(static_cast<unsigned char>(*a))
+       - std::tolower(static_cast<unsigned char>(*b));
+}
+
+static int s_strncasecmp(const char* a, const char* b, std::size_t n)
+{
+  for (std::size_t i = 0U; i < n; ++i)
+  {
+    int diff = std::tolower(static_cast<unsigned char>(a[i]))
+             - std::tolower(static_cast<unsigned char>(b[i]));
+    if (diff != 0) return diff;
+    if (a[i] == '\0') return 0;
+  }
+  return 0;
+}
 
 Console::Console()
   : m_commandCount(0U)
@@ -144,7 +172,7 @@ void Console::dispatch(char* line)
   }
 
   // Built-in: help
-  if (strncasecmp(argv[0], "help", 4U) == 0)
+  if (s_strncasecmp(argv[0], "help", 4U) == 0)
   {
     printHelp();
     return;
@@ -153,7 +181,7 @@ void Console::dispatch(char* line)
   // Search registered commands (case-insensitive).
   for (uint8_t i = 0U; i < m_commandCount; ++i)
   {
-    if (strcasecmp(argv[0], m_commands[i].name) == 0)
+    if (s_strcasecmp(argv[0], m_commands[i].name) == 0)
     {
       m_commands[i].handler(argc, argv);
       return;

@@ -13,10 +13,9 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Debug")
 endif()
 
-set(CMAKE_PROJECT_NAME integrated_motor_controller_firmware)
 set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 
-project(${CMAKE_PROJECT_NAME})
+project(integrated_motor_controller)
 message("Build type: " ${CMAKE_BUILD_TYPE})
 
 enable_language(C CXX ASM)
@@ -27,7 +26,7 @@ enable_language(C CXX ASM)
 set(CUBEMX_DIR ${CMAKE_SOURCE_DIR}/cubemx)
 
 # ---------------------------------------------------------------------------
-# Compile definitions (mirrors cubemx/cmake/stm32cubemx/CMakeLists.txt)
+# Compile definitions
 # ---------------------------------------------------------------------------
 set(MX_Defines_Syms
     USE_HAL_DRIVER
@@ -36,7 +35,7 @@ set(MX_Defines_Syms
 )
 
 # ---------------------------------------------------------------------------
-# Include paths
+# Include paths (HAL + CMSIS)
 # ---------------------------------------------------------------------------
 set(MX_Include_Dirs
     ${CUBEMX_DIR}/Core/Inc
@@ -47,7 +46,7 @@ set(MX_Include_Dirs
 )
 
 # ---------------------------------------------------------------------------
-# STM32 HAL + CMSIS driver sources (compiled as a static library)
+# STM32 HAL + CMSIS — compiled once, shared by both targets
 # ---------------------------------------------------------------------------
 set(STM32_Drivers_Src
     ${CUBEMX_DIR}/Core/Src/system_stm32h5xx.c
@@ -79,9 +78,15 @@ set(STM32_Drivers_Src
     ${CUBEMX_DIR}/Drivers/STM32H5xx_HAL_Driver/Src/stm32h5xx_ll_usb.c
 )
 
+add_library(STM32_Drivers OBJECT)
+target_sources(STM32_Drivers PRIVATE ${STM32_Drivers_Src})
+target_include_directories(STM32_Drivers PUBLIC ${MX_Include_Dirs})
+target_compile_definitions(STM32_Drivers PUBLIC ${MX_Defines_Syms})
+
 # ---------------------------------------------------------------------------
-# CubeMX peripheral init sources
-# Excludes main.c — it is a reference only; main() lives in app/bringup/.
+# CubeMX peripheral init — shared across both targets
+# Note: stm32h5xx_it.c and stm32h5xx_hal_msp.c may need to diverge if
+# bringup and tactical require different IRQ or MSP configurations.
 # ---------------------------------------------------------------------------
 set(MX_Periph_Src
     ${CUBEMX_DIR}/Core/Src/gpio.c
@@ -100,42 +105,54 @@ set(MX_Periph_Src
     ${CUBEMX_DIR}/startup_stm32h563xx.s
 )
 
-# ---------------------------------------------------------------------------
-# Application sources — bringup
-# ---------------------------------------------------------------------------
-set(APP_Bringup_Src
-    ${CMAKE_SOURCE_DIR}/app/bringup/src/main_bringup.cpp
-)
-
-# ---------------------------------------------------------------------------
-# Targets
-# ---------------------------------------------------------------------------
-add_library(STM32_Drivers OBJECT)
-target_sources(STM32_Drivers PRIVATE ${STM32_Drivers_Src})
-target_include_directories(STM32_Drivers PUBLIC ${MX_Include_Dirs})
-target_compile_definitions(STM32_Drivers PUBLIC ${MX_Defines_Syms})
-
-add_executable(${CMAKE_PROJECT_NAME})
-target_sources(${CMAKE_PROJECT_NAME} PRIVATE
-    ${MX_Periph_Src}
-    ${APP_Bringup_Src}
-)
-target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
-    ${MX_Include_Dirs}
-    ${CMAKE_SOURCE_DIR}/app/bringup/include
-)
-target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
-    ${MX_Defines_Syms}
-)
-target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE
-    STM32_Drivers
-    m
-)
-
 # Remove spurious libob.a pulled in by some gcc-arm-none-eabi versions
 list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)
 
-# Map file and memory usage report
-set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES
-    ADDITIONAL_CLEAN_FILES ${CMAKE_PROJECT_NAME}.map
+# ---------------------------------------------------------------------------
+# Target: imc_bringup
+# Interactive USB-CDC console for hardware validation (11-stage checklist)
+# ---------------------------------------------------------------------------
+set(APP_Bringup_Src
+    ${CMAKE_SOURCE_DIR}/app/bringup/src/main_bringup.cpp
+    ${CMAKE_SOURCE_DIR}/app/bringup/src/Console.cpp
+)
+
+add_executable(imc_bringup)
+target_sources(imc_bringup PRIVATE
+    ${MX_Periph_Src}
+    ${APP_Bringup_Src}
+)
+target_include_directories(imc_bringup PRIVATE
+    ${MX_Include_Dirs}
+    ${CMAKE_SOURCE_DIR}/app/bringup/include
+)
+target_compile_definitions(imc_bringup PRIVATE ${MX_Defines_Syms})
+target_link_libraries(imc_bringup PRIVATE STM32_Drivers m)
+target_link_options(imc_bringup PRIVATE -Wl,-Map=${CMAKE_BINARY_DIR}/imc_bringup.map)
+set_target_properties(imc_bringup PROPERTIES
+    ADDITIONAL_CLEAN_FILES ${CMAKE_BINARY_DIR}/imc_bringup.map
+)
+
+# ---------------------------------------------------------------------------
+# Target: imc_tactical
+# Competition / mission control firmware (FreeRTOS to be added)
+# ---------------------------------------------------------------------------
+set(APP_Tactical_Src
+    ${CMAKE_SOURCE_DIR}/app/tactical/src/main_tactical.cpp
+)
+
+add_executable(imc_tactical)
+target_sources(imc_tactical PRIVATE
+    ${MX_Periph_Src}
+    ${APP_Tactical_Src}
+)
+target_include_directories(imc_tactical PRIVATE
+    ${MX_Include_Dirs}
+    ${CMAKE_SOURCE_DIR}/app/tactical/include
+)
+target_compile_definitions(imc_tactical PRIVATE ${MX_Defines_Syms})
+target_link_libraries(imc_tactical PRIVATE STM32_Drivers m)
+target_link_options(imc_tactical PRIVATE -Wl,-Map=${CMAKE_BINARY_DIR}/imc_tactical.map)
+set_target_properties(imc_tactical PROPERTIES
+    ADDITIONAL_CLEAN_FILES ${CMAKE_BINARY_DIR}/imc_tactical.map
 )
