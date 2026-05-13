@@ -64,7 +64,6 @@ int main(void)
   MX_USART1_UART_Init();
   MX_TIM4_Init();
   MX_TIM8_Init();
-  MX_UART5_Init();
 
   uint32_t lastToggleMs = 0U;
 

@@ -13,7 +13,7 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Debug")
 endif()
 
-set(CMAKE_PROJECT_NAME integrated_motor_controller)
+set(CMAKE_PROJECT_NAME integrated_motor_controller_firmware)
 set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 
 project(${CMAKE_PROJECT_NAME})
