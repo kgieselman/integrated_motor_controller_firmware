@@ -9,8 +9,6 @@
 #   make build-tactical  Build imc_tactical only
 #   make rebuild         Wipe build dir + full recompile
 #   make shell           Interactive shell in the container
-#   make format          Run clang-format on app/ and drivers/ (in-place)
-#   make format-check    Check formatting without modifying files (for CI)
 #   make cppcheck        Run cppcheck static analysis (informational, always exits 0)
 #   make cppcheck-ci     Run cppcheck in CI mode (exits non-zero on any finding)
 #   make clean           Remove the build/ directory
@@ -71,17 +69,6 @@ build-tactical:
 rebuild: clean build
 
 # ---------------------------------------------------------------------------
-# Format (runs inside container — clang-format is installed there)
-# ---------------------------------------------------------------------------
-.PHONY: format
-format:
-	$(DOCKER_RUN) scripts/format.sh
-
-.PHONY: format-check
-format-check:
-	$(DOCKER_RUN) scripts/format.sh --check
-
-# ---------------------------------------------------------------------------
 # Static analysis (runs inside container — cppcheck is installed there)
 # ---------------------------------------------------------------------------
 # cppcheck requires compile_commands.json — run 'make build' first.
@@ -138,8 +125,6 @@ help:
 	@echo "  make build-bringup   Build imc_bringup only"
 	@echo "  make build-tactical  Build imc_tactical only"
 	@echo "  make rebuild         Clean + full recompile"
-	@echo "  make format          Run clang-format in-place"
-	@echo "  make format-check    Check formatting (CI-safe, no file changes)"
 	@echo "  make cppcheck        Run cppcheck static analysis (always exits 0)"
 	@echo "  make cppcheck-ci     Run cppcheck, exits non-zero on any finding"
 	@echo "  make shell           Interactive shell in the container"
