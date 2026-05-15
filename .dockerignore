@@ -1,0 +1,39 @@
+# =============================================================
+# .dockerignore — keep the Docker build context small and fast
+# =============================================================
+
+# Build artifacts (large, regenerated inside the container)
+build/
+Build/
+out/
+
+# Git history (not needed in the image)
+.git/
+
+# IDE / editor state
+.vscode/
+.idea/
+cmake-build-*/
+
+# STM32CubeIDE / CubeMX local metadata
+.settings/
+.project
+.cproject
+*.launch
+*.ioc.bak
+*.bak
+
+# Python virtualenvs / caches
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# macOS junk
+.DS_Store
+._*
+
+# Windows junk
+Thumbs.db
+Desktop.ini

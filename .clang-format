@@ -1,0 +1,118 @@
+# =============================================================================
+# .clang-format — IMC Firmware
+# Derived from docs/style_guide.md. Update that doc first, then this file.
+# =============================================================================
+
+Language: Cpp
+Standard: c++17
+
+# ---------------------------------------------------------------------------
+# Indentation — 2 spaces, no tabs (style_guide §12)
+# ---------------------------------------------------------------------------
+IndentWidth: 2
+TabWidth: 2
+UseTab: Never
+ContinuationIndentWidth: 4
+IndentCaseLabels: true
+IndentAccessModifiers: false
+AccessModifierOffset: -2        # puts public:/private: at column 0 inside class
+
+# ---------------------------------------------------------------------------
+# Line length — 100 hard limit (style_guide §12)
+# ---------------------------------------------------------------------------
+ColumnLimit: 100
+
+# ---------------------------------------------------------------------------
+# Brace style — Allman: opening brace always on its own line (style_guide §5.1)
+# ---------------------------------------------------------------------------
+BreakBeforeBraces: Allman
+
+# Keep short constructs expanded — Allman style means no single-line bodies
+AllowShortBlocksOnASingleLine: Never
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortEnumsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortLambdasOnASingleLine: None
+
+# ---------------------------------------------------------------------------
+# Pointer and reference alignment — attached to the type (style_guide §12)
+# uint8_t* buf,  AccelGyro& out
+# ---------------------------------------------------------------------------
+PointerAlignment: Left
+ReferenceAlignment: Left
+DerivePointerAlignment: false
+
+# ---------------------------------------------------------------------------
+# Constructor initializer lists — leading comma, one initializer per line
+# (style_guide §4.2)
+#
+#   Motor::Motor(...)
+#       : m_htim(htim)
+#       , m_channel(channel)
+#   {}
+# ---------------------------------------------------------------------------
+BreakConstructorInitializers: BeforeComma
+PackConstructorInitializers: Never
+ConstructorInitializerIndentWidth: 4
+
+# ---------------------------------------------------------------------------
+# Function parameters — align under opening paren, never bin-pack
+# (style_guide §5.2)
+#
+#   Motor::Motor(TIM_HandleTypeDef* pwmTimer,
+#                uint32_t           pwmChannel,
+#                ...)
+# ---------------------------------------------------------------------------
+BinPackArguments: false
+BinPackParameters: false
+AlignAfterOpenBracket: Align
+AllowAllArgumentsOnNextLine: false
+AllowAllParametersOfDeclarationOnNextLine: false
+
+# ---------------------------------------------------------------------------
+# Spacing
+# ---------------------------------------------------------------------------
+SpaceAfterCStyleCast: false
+SpaceAfterLogicalNot: false
+SpaceBeforeParens: ControlStatements   # space before '(' in if/for/while
+SpaceBeforeRangeBasedForLoopColon: true
+SpacesInAngles: Never
+SpacesInContainerLiterals: false
+SpacesInParens: Never
+SpacesInSquareBrackets: false
+SpacesBeforeTrailingComments: 2        # two spaces before // inline comments
+
+# ---------------------------------------------------------------------------
+# Namespaces (style_guide §7)
+# ---------------------------------------------------------------------------
+CompactNamespaces: false
+NamespaceIndentation: None             # don't indent inside namespace body
+FixNamespaceComments: true             # adds // namespace Foo closing comment
+
+# ---------------------------------------------------------------------------
+# Templates
+# ---------------------------------------------------------------------------
+SpaceAfterTemplateKeyword: true
+
+# ---------------------------------------------------------------------------
+# Comments — leave Doxygen block comments and section dividers untouched
+# (style_guide §8)
+# ---------------------------------------------------------------------------
+ReflowComments: false
+
+# ---------------------------------------------------------------------------
+# Includes — order is significant (own header first, then project, then STL)
+# and managed manually; let clang-format sort only within each #include block
+# without reordering blocks (style_guide §9)
+# ---------------------------------------------------------------------------
+SortIncludes: false
+
+# ---------------------------------------------------------------------------
+# Misc
+# ---------------------------------------------------------------------------
+SortUsingDeclarations: false
+InsertNewlineAtEOF: true               # style_guide §12: newline at end of file
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1                 # style_guide §12: 1 blank line between methods

@@ -1,0 +1,23 @@
+# =============================================================
+# .gitattributes — IMC Firmware
+# Store all text files as LF in the repo. Git handles conversion
+# on checkout so Windows tools (CubeMX, editors) still get CRLF
+# if core.autocrlf is set, but the repo stays LF-canonical.
+# =============================================================
+
+# Default — normalize all text files to LF
+* text=auto eol=lf
+
+# Windows batch files must stay CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary files — never touch line endings
+*.elf binary
+*.bin binary
+*.hex binary
+*.o   binary
+*.a   binary
+*.png binary
+*.jpg binary
+*.pdf binary
