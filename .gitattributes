@@ -21,3 +21,17 @@
 *.png binary
 *.jpg binary
 *.pdf binary
+
+# STM32CubeMX project file
+*.ioc text eol=lf
+
+# Linker scripts
+*.ld  text eol=lf
+
+# =============================================================
+# GitHub Linguist — keep language stats focused on app code,
+# not the vendor HAL/CMSIS files.
+# =============================================================
+cubemx/Drivers/** linguist-vendored
+cubemx/Core/Src/syscalls.c linguist-vendored
+cubemx/Core/Src/sysmem.c   linguist-vendored
