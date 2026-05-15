@@ -32,6 +32,7 @@ integrated_motor_controller_firmware/
 ├── app/
 │   ├── bringup/        # USB-CDC console + hardware validation app
 │   └── tactical/       # Competition firmware (stub)
+├── cmake/              # Toolchain file (gcc-arm-none-eabi)
 ├── cubemx/
 │   ├── integrated_motor_controller.ioc     # CubeMX project (pin/clock config)
 │   ├── Core/           # CubeMX HAL output — do not edit by hand
@@ -41,7 +42,16 @@ integrated_motor_controller_firmware/
 │   ├── readme.md           # Toolchain setup, bringup checklist, pin map
 │   ├── integrated_motor_controller_firmware_arch.md  # Software architecture reference
 │   └── style_guide.md      # C++ conventions and Doxygen requirements
-└── drivers/            # Hardware abstraction layer (8 driver classes)
+├── drivers/            # Hardware abstraction layer (8 driver classes)
+├── scripts/
+│   ├── build.sh        # Configure + compile (runs inside container)
+│   ├── flash.sh        # Flash via OpenOCD (runs on host)
+│   └── format.sh       # clang-format on app/ and drivers/
+├── .devcontainer/
+│   └── devcontainer.json   # VS Code Dev Containers configuration
+├── .clang-format       # Formatting rules derived from style_guide.md
+├── Dockerfile          # Dev container image definition
+└── Makefile            # docker run wrappers for common tasks
 ```
 
 ---
@@ -66,39 +76,50 @@ All drivers are constructed with injected HAL handles, use no dynamic allocation
 
 ## Building
 
+The recommended workflow uses a Docker container — no local toolchain installation required.
+
 ### Prerequisites
 
-**Linux**
-```bash
-sudo apt install cmake ninja-build gcc-arm-none-eabi openocd
-```
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows/macOS) or Docker Engine (Linux)
+- For VS Code: the [Dev Containers](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers) extension
 
-**Windows**
-```
-winget install Kitware.CMake Ninja-build.Ninja
-# ARM toolchain: https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads
-# ST-Link drivers: https://www.st.com/en/development-tools/stsw-link009.html
-```
+STM32CubeMX 6.12+ is still needed on the host if you need to regenerate HAL code from the `.ioc` file.
 
-### Generate HAL (first time)
+### Option A — VS Code Dev Containers (recommended)
 
-Open `cubemx/integrated_motor_controller.ioc` in STM32CubeMX 6.12+ and generate code into `cubemx/` (the `.ioc` directory).
-
-### Build
+1. Open the repo folder in VS Code
+2. Click **"Reopen in Container"** when prompted (or run **Dev Containers: Reopen in Container** from the Command Palette)
+3. VS Code builds the image and configures CMake automatically — clangd IntelliSense is ready when it finishes
+4. Build from the integrated terminal:
 
 ```bash
-cmake -S . -B build -G Ninja
-cmake --build build --target integrated_motor_controller_bringup
+scripts/build.sh                    # all targets
+scripts/build.sh -t imc_bringup    # bringup only
+scripts/build.sh -t imc_tactical   # tactical only
 ```
+
+### Option B — Command line
+
+```bash
+# Build the image once
+docker build -t imc-firmware-dev .
+
+# Build all targets
+docker run --rm -v "$(pwd):/workspace" -w /workspace imc-firmware-dev scripts/build.sh
+```
+
+See `scripts/build.sh --help` for available options (`--type Release`, `--clean`, etc.).
 
 ### Flash
 
+Flashing runs on the **host** (the container does not have USB access to the ST-Link). Connect an ST-Link to the SWD header (J1), then from a host terminal:
+
 ```bash
-openocd -f interface/stlink.cfg -f target/stm32h5x.cfg \
-        -c "program build/bringup/integrated_motor_controller_bringup.elf verify reset exit"
+scripts/flash.sh                    # flash imc_bringup (default)
+scripts/flash.sh -t imc_tactical   # flash imc_tactical
 ```
 
-Connect an ST-Link to the SWD header (J1).
+Requires [OpenOCD 0.12.0+](https://openocd.org) installed on your host machine.
 
 ---
 

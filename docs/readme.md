@@ -15,7 +15,7 @@ Firmware for the Integrated Motor Controller board (STM32H563RIT6). Organized as
 | `drivers/` | ✅ All hardware drivers written (C++), including `AdcDma` for shared ADC1 DMA buffer |
 | `app/bringup/` | 🔄 In progress — `Console` class implemented; test commands not yet wired in `main_bringup.cpp` |
 | `app/tactical/` | ⬜ Stub only |
-| CMakeLists.txt | ⬜ Not yet created — repo is not buildable as-is (see F14 in ISSUES.md) |
+| CMakeLists.txt | ✅ Created — repo builds `imc_bringup` and `imc_tactical` targets |
 
 ---
 
@@ -27,21 +27,19 @@ The same toolchain carries from bringup through tactical firmware — no migrati
 
 ### Prerequisites
 
-| Tool | Version | Notes |
+The repo ships a Docker-based dev environment — no local toolchain installation needed for building.
+
+| Tool | Where needed | Notes |
 |---|---|---|
-| Git | any recent | |
-| CMake | 3.22+ | |
-| Ninja | 1.10+ | |
-| ARM GNU Toolchain | 13.2.Rel1 or 14.2.Rel1 | `arm-none-eabi-gcc` on PATH |
-| OpenOCD | 0.12.0+ | STM32H5 cortex-m33 support |
-| STM32CubeMX | 6.12+ | Only needed when editing pin/clock config |
-| VS Code + Cortex-Debug | current | Optional; any CMake-aware editor works |
+| Docker Desktop | Host (always) | Provides the build container |
+| OpenOCD 0.12.0+ | Host (for flashing) | Talks to the ST-Link; runs outside the container |
+| ST-Link drivers | Host (for flashing) | Windows: [ST-LINK driver](https://www.st.com/en/development-tools/stsw-link009.html) · Linux: udev rules below |
+| STM32CubeMX 6.12+ | Host (optional) | Only needed when editing pin/clock config in the `.ioc` |
+| VS Code + Dev Containers extension | Host (optional) | Recommended editor setup; see `README.md` |
 
-**Windows:** `winget install Kitware.CMake Ninja-build.Ninja` · ARM toolchain from [developer.arm.com](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads) · ST-Link drivers from ST.
+The container provides: `arm-none-eabi-gcc 13`, CMake 3.28+, Ninja, clangd, clang-format, clang-tidy, Python 3.
 
-**Linux:** `sudo apt install cmake ninja-build openocd gcc-arm-none-eabi` (or use xPack for version pinning).
-
-**udev rules (Linux, once per machine):**
+**udev rules (Linux, once per machine — required for ST-Link access):**
 ```bash
 sudo curl -fsSL -o /etc/udev/rules.d/49-stlinkv3.rules \
   https://raw.githubusercontent.com/stlink-org/stlink/develop/config/udev/rules.d/49-stlinkv3.rules
@@ -59,6 +57,8 @@ integrated_motor_controller_firmware/
 │   ├── Core/                      ← CubeMX HAL output — DO NOT edit by hand (MX_* functions, IRQ handlers)
 │   ├── Drivers/                   ← STM32Cube HAL + CMSIS (CubeMX-generated)
 │   └── USB_Device/                ← USB CDC middleware (CubeMX-generated)
+├── cmake/
+│   └── gcc-arm-none-eabi.cmake    ← CMake toolchain file (Cortex-M33 flags, compiler paths)
 ├── drivers/                       ← Hand-written C++ hardware drivers
 │   ├── include/
 │   │   ├── AdcDma.hpp             ← Shared ADC1 DMA buffer (g_adcBuf[]) + slot constants
@@ -77,20 +77,27 @@ integrated_motor_controller_firmware/
 │   │   ├── include/Console.hpp    ← USB-CDC command dispatcher
 │   │   └── src/
 │   │       ├── Console.cpp
-│   │       └── main_bringup.cpp   ← (planned) menu loop over USB-CDC
+│   │       └── main_bringup.cpp   ← menu loop over USB-CDC
 │   └── tactical/
 │       └── src/main_tactical.cpp  ← Placeholder
-└── docs/
-    └── readme.md                  ← This file
+├── scripts/
+│   ├── build.sh                   ← Configure + compile (runs inside the container)
+│   ├── flash.sh                   ← Flash via OpenOCD (runs on the host)
+│   └── format.sh                  ← clang-format on app/ and drivers/
+├── .devcontainer/
+│   └── devcontainer.json          ← VS Code Dev Containers config
+├── docs/
+│   └── readme.md                  ← This file
+├── .clang-format                  ← Formatting rules (derived from style_guide.md)
+├── Dockerfile                     ← Dev container image
+└── Makefile                       ← docker run wrappers for common tasks
 ```
 
-### CMake structure (to be created)
+### CMake targets
 
-The build will use three CMake targets:
-
-- **`cubemx_generated`** (static lib) — CubeMX HAL output; regenerate from `.ioc`, never edit by hand.
-- **`integrated_motor_controller_drivers`** (static lib) — hand-written drivers; links against `cubemx_generated`.
-- **`integrated_motor_controller_bringup`** (executable) — links `integrated_motor_controller_drivers`; produces `.elf/.bin/.hex`.
+- **`STM32_Drivers`** (object lib) — CubeMX HAL + CMSIS; regenerated from `.ioc`, never edited by hand.
+- **`imc_bringup`** (executable) — USB-CDC hardware validation console; produces `build/imc_bringup.elf`.
+- **`imc_tactical`** (executable) — competition firmware; produces `build/imc_tactical.elf`.
 
 ### CubeMX workflow
 
@@ -102,23 +109,37 @@ The build will use three CMake targets:
 
 ## Build and Flash
 
-*(CMakeLists.txt not yet created — these commands are the target state)*
+### Build (inside the container)
+
+From the VS Code integrated terminal (when opened in the Dev Container), or via `docker run`:
 
 ```bash
-cmake -S . -B build -G Ninja
-cmake --build build --target integrated_motor_controller_bringup
+scripts/build.sh                      # configure + build all targets
+scripts/build.sh -t imc_bringup      # bringup only
+scripts/build.sh -t imc_tactical     # tactical only
+scripts/build.sh -t imc_bringup -T Release   # release build
+scripts/build.sh --clean             # wipe build/ and rebuild
 ```
 
-Flash via OpenOCD:
+Run `scripts/build.sh --help` for full options. Build artifacts land in `build/`.
+
+### Flash (on the host — outside the container)
+
+The container does not have USB access to the ST-Link. Run flash commands from a terminal on your host machine with the board connected via SWD header J1:
+
 ```bash
-openocd -f interface/stlink.cfg -f target/stm32h5x.cfg \
-        -c "program build/bringup/integrated_motor_controller_bringup.elf verify reset exit"
+scripts/flash.sh                      # flash imc_bringup (default)
+scripts/flash.sh -t imc_tactical     # flash imc_tactical
 ```
 
-USB-CDC console after flash:
+Requires OpenOCD 0.12.0+ on the host. Run `scripts/flash.sh --help` for options.
+
+### USB-CDC console after flashing bringup
+
 ```bash
-screen /dev/ttyACM0 115200   # Linux
-# Windows: PuTTY or your preferred serial terminal on the enumerated COMx
+screen /dev/ttyACM0 115200          # Linux
+screen /dev/tty.usbmodem* 115200    # macOS
+# Windows: PuTTY on the enumerated COM port, 115200 baud
 ```
 
 ---
