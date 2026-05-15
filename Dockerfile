@@ -6,6 +6,7 @@
 #   - CMake + Ninja
 #   - clangd  (for VS Code / Neovim IntelliSense via the Dev Containers extension)
 #   - clang-format + clang-tidy
+#   - cppcheck (static analysis)
 #   - Python 3  (flash scripts, code-gen helpers, etc.)
 #   - git, make, and common dev utilities
 # =============================================================================
@@ -34,6 +35,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     clangd \
     clang-format \
     clang-tidy \
+    # Static analysis
+    cppcheck \
     # Python (scripts, code-gen)
     python3 \
     python3-pip \

@@ -11,6 +11,8 @@
 #   make shell           Interactive shell in the container
 #   make format          Run clang-format on app/ and drivers/ (in-place)
 #   make format-check    Check formatting without modifying files (for CI)
+#   make cppcheck        Run cppcheck static analysis (informational, always exits 0)
+#   make cppcheck-ci     Run cppcheck in CI mode (exits non-zero on any finding)
 #   make clean           Remove the build/ directory
 #
 # Host targets (run on your machine — require openocd + ST-Link):
@@ -80,6 +82,18 @@ format-check:
 	$(DOCKER_RUN) scripts/format.sh --check
 
 # ---------------------------------------------------------------------------
+# Static analysis (runs inside container — cppcheck is installed there)
+# ---------------------------------------------------------------------------
+# cppcheck requires compile_commands.json — run 'make build' first.
+.PHONY: cppcheck
+cppcheck:
+	$(DOCKER_RUN) scripts/cppcheck.sh
+
+.PHONY: cppcheck-ci
+cppcheck-ci:
+	$(DOCKER_RUN) scripts/cppcheck.sh --ci
+
+# ---------------------------------------------------------------------------
 # Interactive shell inside the container
 # ---------------------------------------------------------------------------
 .PHONY: shell
@@ -126,6 +140,8 @@ help:
 	@echo "  make rebuild         Clean + full recompile"
 	@echo "  make format          Run clang-format in-place"
 	@echo "  make format-check    Check formatting (CI-safe, no file changes)"
+	@echo "  make cppcheck        Run cppcheck static analysis (always exits 0)"
+	@echo "  make cppcheck-ci     Run cppcheck, exits non-zero on any finding"
 	@echo "  make shell           Interactive shell in the container"
 	@echo "  make clean           Delete build/"
 	@echo ""
