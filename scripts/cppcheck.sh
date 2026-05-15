@@ -67,6 +67,7 @@ CPPCHECK_ARGS=(
 
     # Only analyse our own code — skip cubemx/ vendor / generated files
     --file-filter='*/app/*'
+    --file-filter='*/drivers/*'
 
     # ARM Cortex-M platform: 32-bit, 2-byte wchar_t
     --platform=arm32-wchar_t2
