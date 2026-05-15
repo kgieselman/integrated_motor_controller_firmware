@@ -1,17 +1,15 @@
 {
-    "cmake.cmakePath": "cube-cmake",
-    "cmake.generator": "Ninja",
-    "cmake.configureArgs": [
-        "-DCMAKE_COMMAND=cube-cmake",
-        "-DCMAKE_TOOLCHAIN_FILE=${workspaceFolder}/cmake/gcc-arm-none-eabi.cmake"
-    ],
-    "cmake.preferredGenerators": [
-        "Ninja"
-    ],
-    "stm32cube-ide-clangd.path": "cube",
-    "stm32cube-ide-clangd.arguments": [
-        "starm-clangd",
-        "--query-driver=${env:CUBE_BUNDLE_PATH}/gnu-tools-for-stm32/14.3.1+st.2/bin/arm-none-eabi-gcc*",
-        "--query-driver=${env:CUBE_BUNDLE_PATH}/gnu-tools-for-stm32/14.3.1+st.2/bin/arm-none-eabi-g++*"
-    ]
+    // ---------------------------------------------------------------------------
+    // CMake — disabled in favour of the Dev Container workflow.
+    // Configure and build via scripts/build.sh (or the Makefile) inside the
+    // container instead of through the VS Code CMake Tools extension.
+    // ---------------------------------------------------------------------------
+    "cmake.configureOnOpen": false,
+
+    // ---------------------------------------------------------------------------
+    // clangd — settings here apply when opening the repo WITHOUT the container.
+    // When using "Reopen in Container", devcontainer.json overrides these with
+    // the correct paths to the container's /usr/bin/clangd and arm-none-eabi-gcc.
+    // ---------------------------------------------------------------------------
+    "C_Cpp.intelliSenseEngine": "disabled"
 }

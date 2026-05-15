@@ -1,0 +1,45 @@
+{
+    // VS Code Dev Containers configuration for IMC firmware
+    // Open this folder with "Reopen in Container" to get a full
+    // arm-none-eabi-gcc + clangd dev environment inside Docker.
+    "name": "IMC Firmware Dev",
+
+    // Build from the project Dockerfile
+    "build": {
+        "dockerfile": "../Dockerfile",
+        "context": ".."
+    },
+
+    // Mount the workspace into /workspace (matches the Makefile convention)
+    "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+
+    // Extensions to install inside the container
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "llvm-vs-code-extensions.vscode-clangd",  // clangd IntelliSense
+                "ms-vscode.cmake-tools",                   // CMake integration
+                "twxs.cmake"                               // CMake syntax highlighting
+            ],
+            "settings": {
+                // Use the system clangd installed in the container
+                "clangd.path": "clangd",
+                // Pass --query-driver so clangd learns the arm-none-eabi-gcc include paths
+                "clangd.arguments": [
+                    "--query-driver=/usr/bin/arm-none-eabi-gcc*,/usr/bin/arm-none-eabi-g++*",
+                    "--background-index",
+                    "--clang-tidy"
+                ],
+                // Disable the C/C++ IntelliSense provider in favour of clangd
+                "C_Cpp.intelliSenseEngine": "disabled",
+                // CMake uses our toolchain file; don't auto-configure
+                "cmake.configureOnOpen": false
+            }
+        }
+    },
+
+    // Run cmake configure once the container starts so clangd has a
+    // compile_commands.json to index against immediately.
+    "postCreateCommand": "cmake -S . -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/gcc-arm-none-eabi.cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+}
