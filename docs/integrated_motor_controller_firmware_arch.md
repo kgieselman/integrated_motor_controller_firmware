@@ -1,49 +1,52 @@
 # Integrated Motor Controller Firmware Software Architecture
 
-**Bring-Up Firmware · Rev A · STM32H563RIT6**
+**Bringup + Tactical Firmware · Rev A · STM32H563RIT6**
 
-| Field      | Value                                                          |
-|------------|----------------------------------------------------------------|
-| Status     | In progress — drivers written; bringup app and CMake pending  |
-| Board      | Integrated Motor Controller board Rev A                                       |
-| MCU        | STM32H563RIT6 (Cortex-M33, up to 250 MHz, 640 KB SRAM, 2 MB Flash) |
-| Toolchain  | STM32CubeMX → CMake (Ninja) → arm-none-eabi-gcc 13.2/14.2     |
-| Source     | `integrated_motor_controller_firmware/` repository                                 |
+| Field      | Value                                                                    |
+|------------|--------------------------------------------------------------------------|
+| Status     | Bringup: drivers written, console operational. Tactical: FreeRTOS baseline integrated. |
+| Board      | Integrated Motor Controller board Rev A                                  |
+| MCU        | STM32H563RIT6 (Cortex-M33, up to 250 MHz, 640 KB SRAM, 2 MB Flash)    |
+| Toolchain  | STM32CubeMX → CMake (Ninja) → arm-none-eabi-gcc 13.2/14.2               |
+| Source     | `integrated_motor_controller_firmware/` repository                       |
 
 ---
 
 ## 1. Purpose and Scope
 
-This document describes the software architecture for the Integrated Motor Controller bring-up firmware image. Its purpose is to prove out every interface on the Rev A PCB before committing to the tactical application firmware. The architecture is intentionally modular so that individual peripheral drivers can be carried forward into the tactical build without modification.
+This document describes the software architecture for both firmware images produced by this repository:
 
-The bring-up image does not implement control loops, state machines, or an RTOS. It boots the STM32H563, enumerates as a USB-CDC serial device, and exposes a small interactive console for exercising each peripheral on demand.
+- **`imc_bringup`** — bare-metal, no RTOS. Proves every interface on the Rev A PCB through an interactive USB-CDC console.
+- **`imc_tactical`** — FreeRTOS-based competition/mission-control firmware. Shares all drivers with bringup; replaces the application layer with a preemptive task structure.
+
+The driver layer is the reuse boundary. Each driver exposes the same interface regardless of which firmware image links it.
 
 ### 1.1 What is in scope
 
-- USB-CDC console with line-oriented command parser
+- USB-CDC console with line-oriented command parser (bringup)
 - C++ peripheral drivers for every device on the board (LED, button, EEPROM, IMU, motor drivers, encoders, servos, ADC, UARTs)
 - Bring-up test routines invoked from the console (one test module per peripheral)
-- CMake build system for both bringup and tactical targets
+- FreeRTOS V11.1.0 task architecture for the tactical target
+- CMake build system (single repo, two ELF targets, Ninja)
 
 ### 1.2 What is out of scope
 
-- Tactical control firmware (lives in `app/tactical/` — stubbed only)
 - ELRS ESP32 firmware — the module runs stock ELRS; the STM32 treats it as a CRSF UART peer
-- RTOS, control loops, filtering algorithms, or competition-specific logic
+- Competition-specific control loops and state machines (application logic above the driver layer)
 
 ---
 
 ## 2. High-Level Architecture
 
-The firmware is structured as three horizontal layers. Dependencies flow strictly downward: the Application layer calls the Driver layer, which calls the HAL/BSP layer. No layer calls upward.
+Both firmware images share the same three-layer stack. Dependencies flow strictly downward; no layer calls upward.
 
-| Layer       | Contents                                                                                           | Location in repo                                                              |
-|-------------|----------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------|
-| Application | Console loop, command dispatch, bring-up test routines                                             | `app/bringup/`                                                                |
-| Driver      | C++ peripheral drivers — one `.hpp/.cpp` pair per device. Portable across bringup and tactical.   | `drivers/`                                                                    |
-| HAL / BSP   | STM32Cube HAL (CubeMX-generated), CMSIS, USB CDC middleware                                        | `cubemx/`                                                                     |
+| Layer       | Bringup contents                                     | Tactical contents                                      | Location         |
+|-------------|------------------------------------------------------|--------------------------------------------------------|------------------|
+| Application | Console loop, command dispatch, test routines        | FreeRTOS tasks (heartbeat, control, telemetry, …)      | `app/bringup/` · `app/tactical/` |
+| Driver      | C++ peripheral drivers — one `.hpp/.cpp` pair per device, shared unchanged between both targets    | ←                                                      | `drivers/`       |
+| HAL / BSP   | STM32Cube HAL (CubeMX-generated), CMSIS              | ← (same HAL; IRQ table forked in `stm32h5xx_it_tactical.c`) | `cubemx/`  |
 
-The Driver layer is the primary reuse boundary. Each driver exposes a thin, peripheral-agnostic C++ interface (init, read, write, enable/disable). The Application layer calls these without needing to know HAL register details. When the tactical firmware is written, it links the same drivers and replaces only the Application layer.
+The Driver layer is the primary reuse boundary. Each driver exposes a thin C++ interface (init, read, write, enable/disable). The tactical firmware links the same driver library and replaces only the Application layer with FreeRTOS tasks.
 
 ### 2.1 Repository tree
 
@@ -54,16 +57,16 @@ integrated_motor_controller_firmware/
 │   ├── Core/                      ← CubeMX HAL output — DO NOT edit by hand (MX_* functions, IRQ handlers)
 │   ├── Drivers/                   ← STM32Cube HAL + CMSIS (CubeMX-generated)
 │   └── USB_Device/                ← USB CDC middleware (CubeMX-generated)
-├── drivers/                       ← Hand-written C++ hardware drivers
+├── drivers/                       ← Hand-written C++ hardware drivers (shared by both targets)
 │   ├── include/
 │   │   ├── AdcDma.hpp             ← Shared ADC1 DMA buffer (g_adcBuf[]) + slot constants
 │   │   ├── Motor.hpp              ← DRV8874 IN1/IN2 mode + IPROPI via AdcDma slot
-│   │   ├── Encoder.hpp            ← TIM2 (left) / TIM8 (right) quadrature
+│   │   ├── Encoder.hpp            ← TIM4 CH4 / TIM8 CH1 input capture
 │   │   ├── IMU.hpp                ← ICM-42688-P over SPI1
-│   │   ├── EEPROM.hpp             ← M24C64 over I²C2
+│   │   ├── EEPROM.hpp             ← M24C64 over I²C1
 │   │   ├── CRSFReceiver.hpp       ← CRSF framing over UART4 (ELRS), DMA+IDLE receive
 │   │   ├── Battery.hpp            ← VBAT_SENSE via AdcDma slot + voltage divider math
-│   │   ├── ServoChannel.hpp       ← TIM1 CH1/CH2 PWM servo output
+│   │   ├── ServoChannel.hpp       ← TIM2 CH1/CH2/CH3 PWM servo output
 │   │   └── Drivetrain.hpp         ← Differential drive abstraction
 │   └── src/
 │       └── *.cpp
@@ -72,9 +75,14 @@ integrated_motor_controller_firmware/
 │   │   ├── include/Console.hpp    ← USB-CDC command dispatcher
 │   │   └── src/
 │   │       ├── Console.cpp
-│   │       └── main_bringup.cpp
+│   │       └── main_bringup.cpp   ← Bare-metal, no RTOS
 │   └── tactical/
-│       └── src/main_tactical.cpp  ← Stub
+│       ├── include/
+│       │   └── FreeRTOSConfig.h   ← FreeRTOS tuning for STM32H563 @ 250 MHz
+│       └── src/
+│           ├── main_tactical.cpp  ← Creates tasks, starts vTaskStartScheduler()
+│           ├── freertos_hooks.c   ← vApplicationTickHook (HAL_IncTick), idle, stack-overflow, static task memory
+│           └── stm32h5xx_it_tactical.c  ← IRQ table — omits SVC/PendSV/SysTick (FreeRTOS port owns those)
 └── docs/
     ├── readme.md
     ├── integrated_motor_controller_firmware_arch.md   ← This file
@@ -83,7 +91,74 @@ integrated_motor_controller_firmware/
 
 ---
 
-## 3. Module Catalogue
+## 3. Tactical Firmware — FreeRTOS Architecture
+
+### 3.1 Kernel configuration
+
+| Parameter | Value | Notes |
+|---|---|---|
+| Kernel version | FreeRTOS V11.1.0 | Fetched via CMake `FetchContent` at configure time; pinned by `GIT_TAG` |
+| Port | `GCC_ARM_CM33_NTZ_NONSECURE` | Cortex-M33, no TrustZone, FPU enabled (`configENABLE_FPU=1`) |
+| Heap implementation | `heap_4` | Coalescing allocator; 64 KB pool in BSS (`configTOTAL_HEAP_SIZE`) |
+| Tick rate | 1 kHz | `configTICK_RATE_HZ = 1000`; one SysTick IRQ per millisecond |
+| `configCPU_CLOCK_HZ` | `SystemCoreClock` | Evaluated at runtime; automatically correct after `SystemClock_Config()` |
+| Max task priorities | 7 | `configMAX_PRIORITIES`; priority 0 = idle, 6 = highest |
+| Static allocation | Enabled | Idle and timer-daemon tasks use statically allocated TCB + stack in `freertos_hooks.c` |
+| Stack overflow check | Level 2 | Runtime watermark check on every context switch |
+| Config file | `app/tactical/include/FreeRTOSConfig.h` | CMake `freertos_config` interface target points the kernel here |
+
+### 3.2 Interrupt priority scheme
+
+The STM32H563 NVIC is configured with 4 priority bits (NVIC_PRIORITYGROUP_4 → 16 preemption levels, 0 sub-priority levels).
+
+| Priority level | Use |
+|---|---|
+| 0–4 | Reserved (FreeRTOS kernel cannot mask these — never call FreeRTOS APIs from here) |
+| 5 (`configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY`) | Highest priority allowed to call `FromISR` FreeRTOS APIs (e.g. motor fault EXTI) |
+| 6–14 | Normal ISRs that use `FromISR` APIs (DMA, UART, USB, IMU INT) |
+| 15 (`configLIBRARY_LOWEST_INTERRUPT_PRIORITY`) | FreeRTOS SysTick and PendSV (kernel internal) |
+
+Any ISR that calls a `xQueueSendFromISR`, `xTaskNotifyFromISR`, or similar FreeRTOS API **must** be assigned a priority ≥ 5 (numerically). ISRs at priority 0–4 must never call FreeRTOS APIs.
+
+### 3.3 SysTick / HAL tick co-existence
+
+FreeRTOS owns `SysTick_Handler` (aliased via `#define xPortSysTickHandler SysTick_Handler` in `FreeRTOSConfig.h`). `HAL_IncTick()` is kept functional through the tick hook:
+
+```c
+// freertos_hooks.c
+void vApplicationTickHook(void)
+{
+    HAL_IncTick();   // keeps HAL_GetTick() / HAL_Delay() accurate
+}
+```
+
+`stm32h5xx_it_tactical.c` intentionally omits `SVC_Handler`, `PendSV_Handler`, and `SysTick_Handler`; the FreeRTOS port object provides all three.
+
+### 3.4 Task inventory
+
+| Task | Priority | Stack (words) | Purpose |
+|---|---|---|---|
+| Idle (FreeRTOS built-in) | 0 | `configMINIMAL_STACK_SIZE` (128) | Runs `__WFI()` via `vApplicationIdleHook`; statically allocated |
+| Timer daemon (FreeRTOS built-in) | 6 (highest) | 256 | Software timer callbacks |
+| `Heartbeat` | 1 | 256 | Toggles `DEBUG_LED_0` (PC15) at 500 ms; proves scheduler is running |
+
+Additional application tasks (control loop, telemetry, CRSF receive) will be added here as the tactical firmware develops.
+
+### 3.5 Tactical boot sequence
+
+1. `HAL_Init()` — SysTick, Flash latency, power domain.
+2. `SystemClock_Config()` — 250 MHz SYSCLK (same as bringup).
+3. `MX_GPIO_Init()` — all GPIO clocks and EXTI lines.
+4. Peripheral inits as needed (`MX_DMA_Init`, `MX_UART4_Init`, `MX_SPI1_Init`, etc.).
+5. `xTaskCreate(...)` — create application tasks.
+6. `vTaskStartScheduler()` — transfers control to FreeRTOS; never returns.
+7. FreeRTOS runs idle task → `__WFI()` until first tick or higher-priority task unblocks.
+
+`HAL_Delay()` is safe to call after `vTaskStartScheduler()` because `vApplicationTickHook` keeps `uwTick` incrementing. However, prefer `vTaskDelay(pdMS_TO_TICKS(n))` inside tasks so the CPU can context-switch while waiting.
+
+---
+
+## 4. Module Catalogue
 
 Each driver is a `.hpp/.cpp` pair with a defined public C++ interface. Drivers depend only on the STM32 HAL — never on each other or on application code. The `.ioc` and KiCad netlist are the authoritative pin references.
 
@@ -102,9 +177,9 @@ Each driver is a `.hpp/.cpp` pair with a defined public C++ interface. Drivers d
 
 ---
 
-## 4. Module Interfaces
+## 5. Module Interfaces
 
-### 4.1 `Motor` — DRV8874, IN1/IN2 mode
+### 5.1 `Motor` — DRV8874, IN1/IN2 mode
 
 Both motor channels operate in IN1/IN2 (independent half-bridge) mode with PMODE driven high. Current sense (IPROPI) is read from the shared `g_adcBuf[]` populated by the ADC1 DMA circular scan — Motor holds a slot index, not an ADC handle.
 
@@ -138,7 +213,7 @@ IN1/IN2 truth table (PMODE=high on DRV8874):
 | 100% | 100% | Brake   |
 | 0    | 0    | Coast   |
 
-### 4.1a `AdcDma` — Shared ADC1 DMA Buffer
+### 5.1a `AdcDma` — Shared ADC1 DMA Buffer
 
 `AdcDma.hpp` is not a class — it declares a shared `volatile uint16_t g_adcBuf[3]` populated continuously by the ADC1 DMA circular scan, plus slot index constants used by `Motor` and `Battery`.
 
@@ -160,7 +235,7 @@ HAL_ADC_Start_DMA(&hadc1, (uint32_t*)g_adcBuf, ADC_DMA_NUM_CHANNELS);
 
 Drivers snapshot their slot into a local variable before arithmetic; no mutex is required since naturally-aligned 16-bit reads are atomic on Cortex-M33.
 
-### 4.2 `Encoder` — Input Capture
+### 5.2 `Encoder` — Input Capture
 
 > **⚠ Architecture change:** Encoders were previously configured in TIM encoder mode (quadrature, two channels per timer). The current `.ioc` uses single-channel input capture: TIM4 CH4 on PC2 (motor 0) and TIM8 CH1 on PC6 (motor 1). The `Encoder` driver class was written for quadrature mode and must be rewritten to match input capture before any encoder testing.
 
@@ -178,7 +253,7 @@ void    resetCount();
 - Motor 0: PC2 (TIM4 CH4, input capture from TI4) — single channel, direction unknown without second channel
 - Motor 1: PC6 (TIM8 CH1, input capture from TI1) — single channel
 
-### 4.3 `ServoChannel` — 50 Hz PWM
+### 5.3 `ServoChannel` — 50 Hz PWM
 
 ```cpp
 ServoChannel(TIM_HandleTypeDef* htim, uint32_t channel, uint32_t ticksPerUs = 1U);
@@ -196,7 +271,7 @@ uint16_t currentPulseUs() const;
 
 At 250 MHz SYSCLK, prescaler 249 → 1 MHz timer clock → 1 µs/tick, ARR = 19999 → 50 Hz. (TIM2 config confirmed in `.ioc`: `Prescaler=249`, `PeriodNoDither=19999`.)
 
-### 4.4 `CRSFReceiver` — ELRS / CRSF UART
+### 5.4 `CRSFReceiver` — ELRS / CRSF UART
 
 Receive is DMA-driven with IDLE-line detection (`HAL_UARTEx_ReceiveToIdle_DMA`). The ISR callback feeds data into an internal buffer; `update()` processes complete frames from the main loop.
 
@@ -227,7 +302,7 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef* h, uint16_t size)
 
 CRSF frame format: `[SYNC 0xC8] [LEN] [TYPE] [PAYLOAD…] [CRC8/DVB-S2]`
 
-### 4.5 `Console` — USB-CDC Command Dispatcher
+### 5.5 `Console` — USB-CDC Command Dispatcher
 
 `Console` is a class, not a set of free functions. One instance is constructed in `main_bringup.cpp` and shared with test modules via pointer or reference.
 
@@ -255,7 +330,9 @@ USB_DRD_FS on PA11 (D−) / PA12 (D+). `feed()` accumulates bytes into a line bu
 
 ---
 
-## 5. Boot Sequence
+## 6. Boot Sequence
+
+### 6.1 Bringup (`imc_bringup`) — bare-metal
 
 1. `HAL_Init()` — SysTick, Flash latency, power domain.
 2. `SystemClock_Config()` — HSE 25 MHz → PLL → 250 MHz SYSCLK, 48 MHz USB from HSI48+CRS.
@@ -268,16 +345,28 @@ USB_DRD_FS on PA11 (D−) / PA12 (D+). `feed()` accumulates bytes into a line bu
 9. `MX_I2C1_Init()` — EEPROM I²C bus (PB6/PB7).
 10. `MX_I2C3_Init()` — Growth header I²C bus (PA8/PC9).
 11. `MX_TIM2/3/4/8_Init()` — PWM (TIM2 servo, TIM3 motor), input capture (TIM4 encoder 0, TIM8 encoder 1).
-11. `MX_ADC1_Init()` — ADC1 scan configuration. Follow immediately with `HAL_ADCEx_Calibration_Start` + `HAL_ADC_Start_DMA` to start the `g_adcBuf[]` circular scan.
-12. Driver `init()` calls; LED heartbeat started.
-13. `console.printf(banner)` — greet once host connects.
-14. Main loop: `console.poll()`.
+12. `MX_ADC1_Init()` — ADC1 scan configuration. Follow immediately with `HAL_ADCEx_Calibration_Start` + `HAL_ADC_Start_DMA` to start the `g_adcBuf[]` circular scan.
+13. Driver `init()` calls; LED heartbeat started.
+14. `console.printf(banner)` — greet once host connects.
+15. Main loop: `console.poll()`.
 
-**Interrupt priority policy:** USB IRQ at priority 5, UART DMA at priority 6, EXTI fault lines (motor fault, IMU INT1) at priority 4. SysTick default priority 15. Lower numeric value = higher urgency.
+**Interrupt priority policy (bringup):** USB IRQ at priority 5, UART DMA at priority 6, EXTI fault lines (motor fault, IMU INT1) at priority 4. SysTick at priority 15. Lower numeric value = higher urgency.
+
+### 6.2 Tactical (`imc_tactical`) — FreeRTOS
+
+1. `HAL_Init()` — SysTick at lowest priority (FreeRTOS will reconfigure it before the scheduler starts).
+2. `SystemClock_Config()` — identical 250 MHz clock tree; `SystemCoreClock` updated so `configCPU_CLOCK_HZ` is accurate.
+3. `MX_GPIO_Init()` and required peripheral inits.
+4. `xTaskCreate(...)` — register application tasks (currently: `Heartbeat`).
+5. `vTaskStartScheduler()` — FreeRTOS takes over. Reconfigures SysTick at 1 kHz; never returns.
+6. FreeRTOS first tick fires `SysTick_Handler` → `vApplicationTickHook()` → `HAL_IncTick()`.
+7. Idle task executes `__WFI()` between ticks.
+
+**Interrupt priority policy (tactical):** ISRs that call FreeRTOS `FromISR` APIs must use priority 5–14. Priorities 0–4 are non-maskable by the kernel and must never call FreeRTOS APIs. SysTick and PendSV are forced to priority 15 by the port. See Section 3.2 for the full table.
 
 ---
 
-## 6. Hardware–Software Mapping
+## 7. Hardware–Software Mapping
 
 Cross-reference of every MCU signal to its driver class and bring-up test. Derived from `cubemx/integrated_motor_controller.ioc`.
 
@@ -329,60 +418,75 @@ Cross-reference of every MCU signal to its driver class and bring-up test. Deriv
 
 ---
 
-## 7. Design Decisions for Tactical Reuse
+## 8. Design Decisions
 
 | Decision | Rationale |
 |---|---|
 | C++ class-per-device | Clean encapsulation; the tactical firmware instantiates the same classes without modification. |
 | Constructor injection of HAL handles | Enables unit-testable drivers (swap real handle for a stub) without touching driver code. |
-| No dynamic allocation | All driver state in statically allocated objects. No malloc, deterministic layout, safe RTOS port later. |
+| Driver state statically allocated | All driver objects in statically allocated storage. No `malloc` in drivers; predictable memory layout; safe under FreeRTOS. |
 | `bool` return from `init()` | Consistent; callers decide whether to retry, halt, or log. No exceptions (`-fno-exceptions`). |
-| `cubemx/` is CubeMX-owned | Custom code lives entirely in `drivers/` and `app/` — regenerating the `.ioc` never clobbers driver code. CubeMX generates directly into the `.ioc` directory. |
-| Individual ENABLE/MODE per motor | Each DRV8874 channel has its own nSLEEP (ENABLE) and PMODE pin rather than a shared nSLEEP. Allows independent sleep/wake and mode control at the cost of two extra GPIO lines per channel. |
-| ADC1 DMA circular scan for all three channels | All three ADC signals (motor 0 IPROPI, motor 1 IPROPI, VBAT) run on a single ADC1 DMA circular scan into `g_adcBuf[3]`. Drivers read their slot without locking — eliminates the shared-peripheral conflict and keeps the implementation simple. Dual ADC1/ADC2 simultaneous sampling (for phase-aligned current reads) is deferred until current-mode motor control is needed. |
-| USB-CDC decoupled from console | `CDC_Receive_FS()` calls `console.feed()`; `console.poll()` drains the line buffer from the main loop. Easy to swap transport for tactical. |
+| `cubemx/` is CubeMX-owned | Custom code lives entirely in `drivers/` and `app/` — regenerating the `.ioc` never clobbers driver code. |
+| Individual ENABLE/MODE per motor | Each DRV8874 channel has its own nSLEEP (ENABLE) and PMODE pin. Allows independent sleep/wake and mode control. |
+| ADC1 DMA circular scan for all three channels | All three ADC signals run on a single circular DMA scan into `g_adcBuf[3]`. Drivers read their slot without locking — 16-bit aligned reads are atomic on Cortex-M33. |
+| USB-CDC decoupled from console | `CDC_Receive_FS()` calls `console.feed()`; `console.poll()` drains the line buffer. Easy to replace transport in tactical. |
+| FreeRTOS via CMake `FetchContent` | Kernel is fetched at configure time from a pinned `GIT_TAG`; no vendored source in the repo. Re-run configure to pick up a new version. |
+| `freertos_config` interface target | Defined before `FetchContent_MakeAvailable(freertos_kernel)` so FreeRTOS CMake finds `FreeRTOSConfig.h` without the deprecated `FREERTOS_CONFIG_FILE_DIRECTORY` variable. |
+| `stm32h5xx_it_tactical.c` forks the IRQ table | `SVC_Handler`, `PendSV_Handler`, and `SysTick_Handler` are owned by the FreeRTOS port (via `#define` aliases in `FreeRTOSConfig.h`). The tactical IT file omits them; `HAL_IncTick()` is restored through `vApplicationTickHook`. |
+| `heap_4` (coalescing, 64 KB) | Good general-purpose choice for a mixed static/dynamic allocation pattern. 64 KB is conservative given 640 KB SRAM; shrink once task watermarks are profiled. |
+| Static memory for idle + timer tasks | `vApplicationGetIdleTaskMemory` / `vApplicationGetTimerTaskMemory` in `freertos_hooks.c` provide statically allocated TCB + stack. Required because `configSUPPORT_STATIC_ALLOCATION = 1`. |
 
 ---
 
-## 8. Open Items
+## 9. Open Items
 
 See [`ISSUES.md`](../../ISSUES.md) for the authoritative cross-repo tracker. Architecture-relevant items:
 
 | # | Item | Status | Notes |
 |---|------|--------|-------|
-| # | Item | Status | Notes |
-|---|------|--------|-------|
-| — | Driver headers have stale pin references — `AdcDma.hpp`, `Motor.hpp`, `Encoder.hpp` (TIM2 quadrature, now TIM4/TIM8 input capture) | ✅ Done (AdcDma, Motor) | `Encoder.hpp` rework still open — see below |
-| N2 | Integration wiring absent — all `main.c` USER CODE blocks empty; ADC DMA never starts, CRSF/Console never receive | Open | Wire `HAL_ADCEx_Calibration_Start` + `HAL_ADC_Start_DMA`, `CRSFReceiver::init()`, `HAL_UARTEx_RxEventCallback`, `CDC_Receive_FS` → `Console::feed()`. Prerequisite for everything else. |
-| F14 | No top-level CMakeLists.txt; `main_bringup.cpp` / `main_tactical.cpp` not yet written — repo is not buildable | Open | CubeMX stub in `cubemx/CMakeLists.txt` exists but targets only the HAL; need a hand-written top-level file adding `drivers/` and `app/` |
-| — | `Encoder` driver must be rewritten for input capture mode | Open | Current implementation targets TIM2/TIM8 in encoder (quadrature) mode. Hardware now uses TIM4 CH4 IC (PC2) and TIM8 CH1 IC (PC6). F6 (TIM2 wraparound) is moot until rework is done. |
-| N1 | CRSF DMA re-arm collides with circular DMA config | Open | Either revert UART4 RX DMA to NORMAL mode, or keep circular and replace re-arm with a `m_dmaTail` ring index |
-| F7 | 64-bit encoder accumulator not atomic on Cortex-M33 | Open | Add critical section or use 32-bit counter with overflow tracking |
-| F18 | CRSF DMA re-arm after byte-copy loop — compounded by N1 | Open | Address together with N1 |
+| — | Driver headers have stale pin references — `Encoder.hpp` (TIM2 quadrature, now TIM4/TIM8 input capture) | Open | `Encoder.hpp` must be rewritten for IC mode before any encoder testing |
+| N2 | Integration wiring absent — ADC DMA never starts, CRSF/Console never receive | Open | Wire `HAL_ADCEx_Calibration_Start` + `HAL_ADC_Start_DMA`, `CRSFReceiver::init()`, `HAL_UARTEx_RxEventCallback`, `CDC_Receive_FS` → `Console::feed()` |
+| — | Tactical task inventory is a stub — only `Heartbeat` task exists | Open | Define and create control loop, CRSF receive, and telemetry tasks; assign priorities using Section 3.2 policy |
+| — | Tactical peripheral init incomplete — only GPIO initialised in `main_tactical.cpp` | Open | Add `MX_DMA_Init`, `MX_UART4_Init`, `MX_SPI1_Init`, `MX_ADC1_Init`, timer inits before `vTaskStartScheduler()` |
+| — | FreeRTOS ISR priority not yet set for shared peripherals | Open | Any ISR calling FreeRTOS `FromISR` APIs must be assigned priority 5–14 via `HAL_NVIC_SetPriority` before `vTaskStartScheduler()` |
+| — | `configTOTAL_HEAP_SIZE` (64 KB) is unvalidated | Open | Profile task stack watermarks with `uxTaskGetStackHighWaterMark()`; right-size heap |
+| — | `Encoder` driver must be rewritten for input capture mode | Open | Hardware uses TIM4 CH4 IC (PC2) and TIM8 CH1 IC (PC6) — quadrature driver is wrong |
+| N1 | CRSF DMA re-arm collides with circular DMA config | Open | Revert UART4 RX DMA to NORMAL mode or use a `m_dmaTail` ring index |
+| F7 | 64-bit encoder accumulator not atomic on Cortex-M33 | Open | Protect with `taskENTER_CRITICAL()` / `taskEXIT_CRITICAL()` in tactical, or use 32-bit counter with overflow tracking |
+| F18 | CRSF DMA re-arm after byte-copy loop | Open | Address together with N1 |
 | F4 | `IMU::readBurst` fixed 12-byte dummy buffer ignores `len` param | Open | Size the buffer to `len` or add assertion |
-| F2/F8 | Console USB re-entrancy and blocking `HAL_Delay` in transmit path | Open | Move transmit to non-blocking main-context path |
-| F3 | Console ISR/main shared state | Open | `m_lineBuf`, `m_lineIdx`, `m_lineReady` lack synchronization between `feed()` (ISR) and `poll()` (main) |
-| F19–F21 | CRSF `uint8_t` arithmetic, `m_dmaRxBuf` not `volatile`, PRIMASK not saved | Open | See ISSUES.md for details |
+| F2/F8 | Console USB re-entrancy and blocking `HAL_Delay` in transmit path | Open | Move transmit to non-blocking path (moot for tactical which does not use `Console`) |
+| F3 | Console ISR/main shared state | Open | `m_lineBuf`, `m_lineIdx`, `m_lineReady` unprotected between `feed()` (ISR) and `poll()` (main) |
+| F19–F21 | CRSF `uint8_t` arithmetic, `m_dmaRxBuf` not `volatile`, PRIMASK not saved | Open | See ISSUES.md |
 | P10 | VBAT divider ratio unconfirmed | Open | Measure on bench; encode confirmed ratio in `Battery.hpp::kDividerRatio` |
 | — | CI (GitHub Actions) not set up | Open | Matrix build ubuntu/windows via `carlosperate/arm-none-eabi-gcc-action@v1` |
-| — | **Buzzer driver absent** — PC14 (DEBUG_BUZZER) is a GPIO output in the ioc but has no driver class or bringup test. Add a simple GPIO toggle wrapper and a `test buzzer` console command. | Open | New peripheral added in PCB rev |
-| — | **SERVO_2 ioc not updated** — third servo added to PCB schematic; ioc pin assignment and TIM channel not yet configured. `ServoChannel` driver is ready to instantiate a third channel once the ioc is updated. | ✅ Done | PA2 (TIM2 CH3) — ioc updated |
+| — | Buzzer driver absent — PC14 (DEBUG_BUZZER) has no driver class or bringup test | Open | Add simple GPIO toggle wrapper and `test buzzer` console command |
+| — | FreeRTOS kernel integrated for tactical target | ✅ Done | V11.1.0, port `GCC_ARM_CM33_NTZ_NONSECURE`, heap_4; both targets build clean — 2026-05-17 |
+| — | `stm32h5xx_it.c` split per-target — tactical uses `stm32h5xx_it_tactical.c` | ✅ Done | FreeRTOS port owns SVC/PendSV/SysTick; `HAL_IncTick` restored via tick hook — 2026-05-17 |
+| — | SERVO_2 ioc updated — PA2 (TIM2 CH3) | ✅ Done | — |
 | F1 | LMOT_FAULT pin conflict | ✅ Done | Resolved 2026-04-23 |
-| F5 | ADC1 shared without coordination | ✅ Done | `AdcDma.hpp/cpp` implements continuous DMA circular scan — resolved 2026-04-23 |
+| F5 | ADC1 shared without coordination | ✅ Done | `AdcDma.hpp/cpp` circular DMA scan — resolved 2026-04-23 |
 | — | CubeMX HAL output generated into `cubemx/` | ✅ Done | — |
 | — | CRSF ISR/main shared state (`volatile` + critical sections) | ✅ Done | Resolved 2026-04-22 |
+| F14 | Top-level CMakeLists.txt and both `main_*.cpp` files absent | ✅ Done | Both targets compile; Docker + Ninja build working |
 
 ---
 
-## 9. Success Criteria
+## 10. Success Criteria
 
-The bring-up firmware is complete when:
+### Bringup (`imc_bringup`)
 
 - Every stage in the bring-up checklist (`docs/readme.md`) produces `PASS` on the USB-CDC console.
-- `integrated_motor_controller_bringup` and `integrated_motor_controller_tactical` both compile without warnings from the same `cmake --build` invocation.
-- CI passes on ubuntu-latest and windows-latest.
-- All driver class interfaces are stable — the tactical firmware can link the drivers library without modification.
+- All driver class interfaces are stable — the tactical firmware links the same library without modification.
 - The validated board is tagged `v0.1.0-bringup` and the checklist is archived with board serial and date.
+
+### Tactical (`imc_tactical`)
+
+- `imc_bringup` and `imc_tactical` both compile without warnings from a single `cmake --build` invocation.
+- FreeRTOS scheduler starts and `Heartbeat` task toggles `DEBUG_LED_0` at 500 ms as observed on hardware.
+- No stack overflow hooks fire; `uxTaskGetStackHighWaterMark()` shows ≥ 20% headroom on all tasks.
+- All ISRs calling FreeRTOS APIs operate at priority 5–14; no `configASSERT` fires in the kernel.
+- CI passes on ubuntu-latest for both targets.
 
 ---
 

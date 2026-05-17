@@ -98,15 +98,40 @@ set(MX_Periph_Src
     ${CUBEMX_DIR}/Core/Src/tim.c
     ${CUBEMX_DIR}/Core/Src/usart.c
     ${CUBEMX_DIR}/Core/Src/usb.c
-    ${CUBEMX_DIR}/Core/Src/stm32h5xx_it.c
     ${CUBEMX_DIR}/Core/Src/stm32h5xx_hal_msp.c
     ${CUBEMX_DIR}/Core/Src/sysmem.c
     ${CUBEMX_DIR}/Core/Src/syscalls.c
     ${CUBEMX_DIR}/startup_stm32h563xx.s
 )
+# stm32h5xx_it.c is target-specific: bringup uses the CubeMX version,
+# tactical uses stm32h5xx_it_tactical.c (FreeRTOS owns SVC/PendSV/SysTick).
 
 # Remove spurious libob.a pulled in by some gcc-arm-none-eabi versions
 list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)
+
+# ---------------------------------------------------------------------------
+# FreeRTOS Kernel — fetched at configure time, used by imc_tactical only
+# ---------------------------------------------------------------------------
+include(FetchContent)
+
+FetchContent_Declare(
+    freertos_kernel
+    GIT_REPOSITORY https://github.com/FreeRTOS/FreeRTOS-Kernel.git
+    GIT_TAG        V11.1.0
+    GIT_SHALLOW    TRUE
+)
+
+# 'freertos_config' must exist before FetchContent_MakeAvailable — FreeRTOS
+# CMakeLists checks for it with if(NOT TARGET freertos_config) at configure time.
+add_library(freertos_config INTERFACE)
+target_include_directories(freertos_config SYSTEM INTERFACE
+    "${CMAKE_SOURCE_DIR}/app/tactical/include"
+)
+
+set(FREERTOS_PORT GCC_ARM_CM33_NTZ_NONSECURE CACHE STRING "FreeRTOS port" FORCE)
+set(FREERTOS_HEAP 4                           CACHE STRING "FreeRTOS heap implementation" FORCE)
+
+FetchContent_MakeAvailable(freertos_kernel)
 
 # ---------------------------------------------------------------------------
 # Target: imc_bringup
@@ -120,6 +145,7 @@ set(APP_Bringup_Src
 add_executable(imc_bringup)
 target_sources(imc_bringup PRIVATE
     ${MX_Periph_Src}
+    ${CUBEMX_DIR}/Core/Src/stm32h5xx_it.c
     ${APP_Bringup_Src}
 )
 target_include_directories(imc_bringup PRIVATE
@@ -139,6 +165,8 @@ set_target_properties(imc_bringup PROPERTIES
 # ---------------------------------------------------------------------------
 set(APP_Tactical_Src
     ${CMAKE_SOURCE_DIR}/app/tactical/src/main_tactical.cpp
+    ${CMAKE_SOURCE_DIR}/app/tactical/src/freertos_hooks.c
+    ${CMAKE_SOURCE_DIR}/app/tactical/src/stm32h5xx_it_tactical.c
 )
 
 add_executable(imc_tactical)
@@ -151,7 +179,7 @@ target_include_directories(imc_tactical PRIVATE
     ${CMAKE_SOURCE_DIR}/app/tactical/include
 )
 target_compile_definitions(imc_tactical PRIVATE ${MX_Defines_Syms})
-target_link_libraries(imc_tactical PRIVATE STM32_Drivers m)
+target_link_libraries(imc_tactical PRIVATE STM32_Drivers freertos_kernel m)
 target_link_options(imc_tactical PRIVATE -Wl,-Map=${CMAKE_BINARY_DIR}/imc_tactical.map)
 set_target_properties(imc_tactical PROPERTIES
     ADDITIONAL_CLEAN_FILES ${CMAKE_BINARY_DIR}/imc_tactical.map

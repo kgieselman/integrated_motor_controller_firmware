@@ -1,31 +1,43 @@
 /*******************************************************************************
  * @file main_tactical.cpp
- * @brief Integrated Motor Controller tactical application entry point.
+ * @brief Integrated Motor Controller — tactical application entry point.
  *
- * Stub — FreeRTOS and competition control logic to be added.
- *
- * Clock configuration mirrors imc_bringup:
- *   HSE 25 MHz (bypass) → PLL1 (M=2, N=40, P=2) → 250 MHz SYSCLK
+ * Clock: HSE 25 MHz (bypass) → PLL1 (M=2, N=40, P=2) → 250 MHz SYSCLK
  ******************************************************************************/
 
 extern "C"
 {
 #include "stm32h5xx_hal.h"
 #include "gpio.h"
+#include "main.h"
+#include "FreeRTOS.h"
+#include "task.h"
 }
 
 static void SystemClock_Config(void);
 
+static void vHeartbeatTask(void *pvParameters)
+{
+    (void)pvParameters;
+    for (;;)
+    {
+        HAL_GPIO_TogglePin(DEBUG_LED_0_GPIO_Port, DEBUG_LED_0_Pin);
+        vTaskDelay(pdMS_TO_TICKS(500U));
+    }
+}
+
 int main(void)
 {
-  HAL_Init();
-  SystemClock_Config();
-  MX_GPIO_Init();
+    HAL_Init();
+    SystemClock_Config();
+    MX_GPIO_Init();
 
-  while (1)
-  {
-    HAL_Delay(1000U);
-  }
+    xTaskCreate(vHeartbeatTask, "Heartbeat", configMINIMAL_STACK_SIZE * 2U, nullptr, 1U, nullptr);
+
+    vTaskStartScheduler();
+
+    /* Should never reach here */
+    for (;;) {}
 }
 
 extern "C" void Error_Handler(void)
