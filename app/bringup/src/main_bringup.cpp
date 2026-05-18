@@ -35,16 +35,17 @@ extern "C"
 #include <cstdint>
 
 /* Private declarations ------------------------------------------------------*/
-
 static void SystemClock_Config(void);
 
-/* File-local constants ------------------------------------------------------*/
 
+/* File-local constants ------------------------------------------------------*/
 /// Heartbeat toggle period (500 ms on + 500 ms off = 1 Hz blink).
 static constexpr uint32_t kHeartbeatPeriodMs = 500U;
 
-/* Entry point ---------------------------------------------------------------*/
+#define DEBUG_NUCLEO (1)
 
+
+/* Entry point ---------------------------------------------------------------*/
 int main(void)
 {
   HAL_Init();
@@ -99,6 +100,9 @@ extern "C" void Error_Handler(void)
  * Source: cubemx/Core/Src/main.c (reference — do not compile that file).
  * HSE 25 MHz bypass → PLL1 (M=2, N=40, P=2) → 250 MHz SYSCLK.
  * HSI48 enabled for USB; CRS locks it to USB SOF.
+ *
+ * Nucleo (DEBUG_NUCLEO=1): HSE 8 MHz digital bypass → PLL1 (M=4, N=250, P=2)
+ * → 250 MHz SYSCLK. HSI48 also enabled so USB clock source is available.
  */
 static void SystemClock_Config(void)
 {
@@ -108,6 +112,23 @@ static void SystemClock_Config(void)
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE0);
   while (!__HAL_PWR_GET_FLAG(PWR_FLAG_VOSRDY)) {}
 
+  // Temporary compile flag for initial dev on nucleo board
+    // Waiting for fabrication/assembly of custom PCB
+#if DEBUG_NUCLEO
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE | RCC_OSCILLATORTYPE_HSI48;
+  RCC_OscInitStruct.HSEState = RCC_HSE_BYPASS_DIGITAL;
+  RCC_OscInitStruct.HSI48State = RCC_HSI48_ON;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLL1_SOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLM = 4;
+  RCC_OscInitStruct.PLL.PLLN = 250;
+  RCC_OscInitStruct.PLL.PLLP = 2;
+  RCC_OscInitStruct.PLL.PLLQ = 2;
+  RCC_OscInitStruct.PLL.PLLR = 2;
+  RCC_OscInitStruct.PLL.PLLRGE = RCC_PLL1_VCIRANGE_1;
+  RCC_OscInitStruct.PLL.PLLVCOSEL = RCC_PLL1_VCORANGE_WIDE;
+  RCC_OscInitStruct.PLL.PLLFRACN = 0;
+#else
   RCC_OscInitStruct.OscillatorType      = RCC_OSCILLATORTYPE_HSI48
                                         | RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState            = RCC_HSE_BYPASS;
@@ -122,6 +143,7 @@ static void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLRGE         = RCC_PLL1_VCIRANGE_3;
   RCC_OscInitStruct.PLL.PLLVCOSEL      = RCC_PLL1_VCORANGE_WIDE;
   RCC_OscInitStruct.PLL.PLLFRACN       = 0;
+#endif
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
