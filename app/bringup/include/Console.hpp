@@ -1,16 +1,18 @@
 /*******************************************************************************
  * @file Console.hpp
- * @brief USB-CDC command console for the bring-up firmware.
+ * @brief UART command console for the bring-up firmware.
  *
- * Provides a minimal line-oriented command dispatcher over the USB CDC
- * virtual serial port. Commands are registered as function pointers so each
- * test module can self-register without touching the core console code.
+ * Provides a minimal line-oriented command dispatcher over a HAL UART
+ * peripheral. Commands are registered as function pointers so each test
+ * module can self-register without touching the core console code.
  *
- * Expected UART/CDC baud: 115200 (effective — USB CDC is full-speed USB).
+ * Currently wired to UART4 (PC10/PC11, 420000 baud) via the CRSF connector.
+ * Swap to USART1 (PB14/PB15, 115200 baud) by changing the handle passed to
+ * the constructor once that connector is populated.
  *
  * Usage:
  * @code
- *   Console console;
+ *   Console console(&huart4);
  *   console.registerCommand("imu", "Test IMU WHO_AM_I and streaming", testImu);
  *   console.registerCommand("motor", "Test left/right motor channels", testMotors);
  *
@@ -18,15 +20,15 @@
  *   console.poll();
  * @endcode
  *
- * @note USB CDC transmit uses CDC_Transmit_FS() from the CubeMX-generated
- *       USB_Device middleware. Receive bytes are fed via the
- *       CDC_Receive_FS() callback — call Console::feed() from there.
+ * @note Receive bytes are fed via HAL_UART_RxCpltCallback — call
+ *       Console::feed() from there after re-arming HAL_UART_Receive_IT().
  *
  * @author Integrated Motor Controller firmware team
  ******************************************************************************/
 
 #pragma once
 
+#include "stm32h5xx_hal.h"
 #include <cstdint>
 
 /// Maximum number of commands that can be registered.
@@ -57,10 +59,14 @@ public:
   /**
    * @brief Construct the Console.
    *
+   * @param uart HAL UART handle to use for TX and RX.
+   *             Pass &huart4 (CRSF port) for now; swap to &huart1 (USART1
+   *             growth connector) once that hardware is populated.
+   *
    * Call registerCommand() to populate the command table, then poll()
    * in the main loop.
    */
-  Console();
+  explicit Console(UART_HandleTypeDef* uart);
 
   /**
    * @brief Register a command with the console.
@@ -130,6 +136,8 @@ private:
     const char*    help;
     CommandHandler handler;
   };
+
+  UART_HandleTypeDef* m_uart;            ///< UART peripheral used for I/O.
 
   CommandEntry m_commands[kMaxCommands]; ///< Registered command table.
   uint8_t      m_commandCount;           ///< Number of registered commands.

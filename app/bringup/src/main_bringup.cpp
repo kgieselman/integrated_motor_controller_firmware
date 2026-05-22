@@ -32,6 +32,7 @@ extern "C"
 #include "main.h"
 }
 
+#include "Console.hpp"
 #include <cstdint>
 
 /* Private declarations ------------------------------------------------------*/
@@ -42,6 +43,12 @@ static void SystemClock_Config(void);
 
 /// Heartbeat toggle period (500 ms on + 500 ms off = 1 Hz blink).
 static constexpr uint32_t kHeartbeatPeriodMs = 500U;
+
+// Console instance — swap to &huart1 once the USART1 connector is populated.
+static Console console(&huart4);
+
+// Single-byte RX staging buffer for interrupt-driven receive.
+static uint8_t s_rxByte;
 
 /* Entry point ---------------------------------------------------------------*/
 
@@ -65,6 +72,11 @@ int main(void)
   MX_TIM4_Init();
   MX_TIM8_Init();
 
+  // Arm the first UART RX interrupt — re-armed in HAL_UART_RxCpltCallback.
+  HAL_UART_Receive_IT(&huart4, &s_rxByte, 1U);
+
+  console.println("IMC bring-up console ready. Type 'help' for commands.");
+
   uint32_t lastToggleMs = 0U;
 
   while (1)
@@ -75,6 +87,26 @@ int main(void)
       HAL_GPIO_TogglePin(DEBUG_LED_0_GPIO_Port, DEBUG_LED_0_Pin);
       lastToggleMs = now;
     }
+
+    console.poll();
+  }
+}
+
+/* UART RX interrupt callback -------------------------------------------------*/
+
+/**
+ * @brief Called by HAL when a UART RX interrupt fires.
+ *
+ * Feeds the received byte into the console and re-arms for the next byte.
+ * Swap huart4 → huart1 (and &huart4 → &huart1) when the USART1 connector
+ * is populated.
+ */
+extern "C" void HAL_UART_RxCpltCallback(UART_HandleTypeDef* huart)
+{
+  if (huart->Instance == UART4)
+  {
+    console.feed(&s_rxByte, 1U);
+    HAL_UART_Receive_IT(&huart4, &s_rxByte, 1U);
   }
 }
 
