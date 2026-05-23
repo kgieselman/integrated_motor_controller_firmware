@@ -34,6 +34,7 @@ extern "C"
 
 #include "Console.hpp"
 #include "tests/BatteryTest.hpp"
+#include "tests/BuzzerTest.hpp"
 #include "tests/CrsfTest.hpp"
 #include "tests/LedTest.hpp"
 #include "tests/EepromTest.hpp"
@@ -85,6 +86,7 @@ int main(void)
   // Arm the first UART RX interrupt — re-armed in HAL_UART_RxCpltCallback.
   HAL_UART_Receive_IT(&huart4, &s_rxByte, 1U);
 
+  registerBuzzerTests(console);
   registerImuTests(console);
   registerMotorTests(console);
   registerEncoderTests(console);

@@ -140,6 +140,7 @@ FetchContent_MakeAvailable(freertos_kernel)
 set(APP_Bringup_Src
     ${CMAKE_SOURCE_DIR}/app/bringup/src/main_bringup.cpp
     ${CMAKE_SOURCE_DIR}/app/bringup/src/Console.cpp
+    ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/BuzzerTest.cpp
     ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/ImuTest.cpp
     ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/MotorTest.cpp
     ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/EncoderTest.cpp
