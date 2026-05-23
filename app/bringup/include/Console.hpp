@@ -31,6 +31,8 @@
 #include "stm32h5xx_hal.h"
 #include <cstdint>
 
+class Console; // forward declaration for CommandHandler
+
 /// Maximum number of commands that can be registered.
 static constexpr uint8_t kMaxCommands = 32U;
 
@@ -43,10 +45,12 @@ static constexpr uint8_t kMaxArgs     = 8U;
 /**
  * @brief Signature for a bring-up test command handler.
  *
- * @param argc Number of arguments (argv[0] is the command name).
- * @param argv Null-terminated argument strings.
+ * @param console Reference to the Console — use for output and to call
+ *                interrupted() inside streaming loops.
+ * @param argc    Number of arguments (argv[0] is the command name).
+ * @param argv    Null-terminated argument strings.
  */
-using CommandHandler = void (*)(int argc, char* argv[]);
+using CommandHandler = void (*)(Console& console, int argc, char* argv[]);
 
 /**
  * @brief Simple line-buffered USB-CDC command console.
@@ -103,6 +107,15 @@ public:
   void poll();
 
   /**
+   * @brief Returns true (and clears the flag) if a byte arrived since the
+   *        last call.  Poll this inside streaming loops to detect a keypress.
+   *
+   * Safe to call from main-loop context; the flag is set from the UART ISR
+   * via feed(), so m_stopFlag is declared volatile.
+   */
+  bool interrupted();
+
+  /**
    * @brief Print a null-terminated string to the USB-CDC console.
    *
    * Wraps CDC_Transmit_FS(). Safe to call from command handlers.
@@ -128,6 +141,18 @@ public:
    */
   void println(const char* str);
 
+  /**
+   * @brief Print the full command listing (same output as the "help" command).
+   *
+   * Call after all commands are registered to greet the user at startup.
+   */
+  void printHelp();
+
+  /**
+   * @brief Print board and firmware information (same output as "about").
+   */
+  void printAbout();
+
 private:
   /// A registered command entry.
   struct CommandEntry
@@ -146,6 +171,10 @@ private:
   uint8_t m_lineIdx;              ///< Current write position in m_lineBuf.
   bool    m_lineReady;            ///< True when a complete line is buffered.
 
+  /// Set by feed() on every incoming byte; cleared by interrupted() and poll().
+  /// Volatile because feed() is called from the UART ISR.
+  volatile bool m_stopFlag;
+
   /**
    * @brief Dispatch a complete null-terminated command line.
    *
@@ -155,13 +184,6 @@ private:
    * @param line Null-terminated command line.
    */
   void dispatch(char* line);
-
-  /**
-   * @brief Built-in "help" command implementation.
-   *
-   * Lists all registered commands and their descriptions.
-   */
-  void printHelp();
 };
 
 /* EOF -----------------------------------------------------------------------*/

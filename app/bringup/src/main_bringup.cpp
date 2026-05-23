@@ -33,6 +33,13 @@ extern "C"
 }
 
 #include "Console.hpp"
+#include "tests/BatteryTest.hpp"
+#include "tests/CrsfTest.hpp"
+#include "tests/EepromTest.hpp"
+#include "tests/EncoderTest.hpp"
+#include "tests/ImuTest.hpp"
+#include "tests/MotorTest.hpp"
+#include "tests/ServoTest.hpp"
 #include <cstdint>
 
 /* Private declarations ------------------------------------------------------*/
@@ -77,7 +84,16 @@ int main(void)
   // Arm the first UART RX interrupt — re-armed in HAL_UART_RxCpltCallback.
   HAL_UART_Receive_IT(&huart4, &s_rxByte, 1U);
 
-  console.println("IMC bring-up console ready. Type 'help' for commands.");
+  registerImuTests(console);
+  registerMotorTests(console);
+  registerEncoderTests(console);
+  registerBatteryTests(console);
+  registerEepromTests(console);
+  registerServoTests(console);
+  registerCrsfTests(console);
+
+  console.printAbout();
+  console.printHelp();
 
   uint32_t lastToggleMs = 0U;
 

@@ -140,6 +140,13 @@ FetchContent_MakeAvailable(freertos_kernel)
 set(APP_Bringup_Src
     ${CMAKE_SOURCE_DIR}/app/bringup/src/main_bringup.cpp
     ${CMAKE_SOURCE_DIR}/app/bringup/src/Console.cpp
+    ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/ImuTest.cpp
+    ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/MotorTest.cpp
+    ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/EncoderTest.cpp
+    ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/BatteryTest.cpp
+    ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/EepromTest.cpp
+    ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/ServoTest.cpp
+    ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/CrsfTest.cpp
 )
 
 add_executable(imc_bringup)
@@ -151,6 +158,7 @@ target_sources(imc_bringup PRIVATE
 target_include_directories(imc_bringup PRIVATE
     ${MX_Include_Dirs}
     ${CMAKE_SOURCE_DIR}/app/bringup/include
+    ${CMAKE_SOURCE_DIR}/drivers/include
 )
 target_compile_definitions(imc_bringup PRIVATE ${MX_Defines_Syms})
 target_link_libraries(imc_bringup PRIVATE STM32_Drivers m)

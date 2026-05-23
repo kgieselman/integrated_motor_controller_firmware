@@ -44,6 +44,7 @@ Console::Console(UART_HandleTypeDef* uart)
   , m_commandCount(0U)
   , m_lineIdx(0U)
   , m_lineReady(false)
+  , m_stopFlag(false)
 {
   for (uint8_t i = 0U; i < kMaxCommands; ++i)
   {
@@ -66,6 +67,7 @@ bool Console::registerCommand(const char*    name,
 
 void Console::feed(const uint8_t* buf, uint32_t len)
 {
+  m_stopFlag = true; // Any incoming byte signals the user; streaming loops check this.
   for (uint32_t i = 0U; i < len; ++i)
   {
     char c = static_cast<char>(buf[i]);
@@ -97,6 +99,13 @@ void Console::feed(const uint8_t* buf, uint32_t len)
   }
 }
 
+bool Console::interrupted()
+{
+  bool f  = m_stopFlag;
+  m_stopFlag = false;
+  return f;
+}
+
 void Console::poll()
 {
   if (!m_lineReady)
@@ -104,6 +113,7 @@ void Console::poll()
     return;
   }
   m_lineReady = false;
+  m_stopFlag  = false; // Discard input that formed the command itself.
 
   // Work on a local copy so feed() can safely refill m_lineBuf while we parse.
   char local[kMaxLineLen];
@@ -167,10 +177,16 @@ void Console::dispatch(char* line)
     return; // blank line
   }
 
-  // Built-in: help
+  // Built-ins: help, about
   if (s_strncasecmp(argv[0], "help", 4U) == 0)
   {
     printHelp();
+    return;
+  }
+
+  if (s_strncasecmp(argv[0], "about", 5U) == 0)
+  {
+    printAbout();
     return;
   }
 
@@ -179,7 +195,7 @@ void Console::dispatch(char* line)
   {
     if (s_strcasecmp(argv[0], m_commands[i].name) == 0)
     {
-      m_commands[i].handler(argc, argv);
+      m_commands[i].handler(*this, argc, argv);
       return;
     }
   }
@@ -189,14 +205,25 @@ void Console::dispatch(char* line)
 
 void Console::printHelp()
 {
-  println("Integrated Motor Controller bring-up console — available commands:");
+  println("Available commands:");
   println("  help             Show this message");
+  println("  about            Board and firmware information");
   for (uint8_t i = 0U; i < m_commandCount; ++i)
   {
     printf("  %-16s %s\r\n",
            m_commands[i].name ? m_commands[i].name : "?",
            m_commands[i].help ? m_commands[i].help : "");
   }
+}
+
+void Console::printAbout()
+{
+  println("-----------------------------------");
+  println("  Integrated Motor Controller");
+  println("  MCU  : STM32H563  @ 250 MHz (Cortex-M33)");
+  println("  Build: " __DATE__ " " __TIME__ " UTC");
+  println("  Port : UART4 @ 420000 baud (CRSF connector)");
+  println("-----------------------------------");
 }
 
 /* EOF -----------------------------------------------------------------------*/
