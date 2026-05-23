@@ -90,4 +90,7 @@ echo ""
 echo ">>> Build complete. Artifacts:"
 find "$BUILD_DIR" -maxdepth 1 -name "*.elf" | sort | while read -r f; do
     arm-none-eabi-size "$f" 2>/dev/null || ls -lh "$f"
+    bin="${f%.elf}.bin"
+    arm-none-eabi-objcopy -O binary "$f" "$bin"
+    echo "    -> ${bin}"
 done
