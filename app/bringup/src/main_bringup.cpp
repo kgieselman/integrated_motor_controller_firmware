@@ -39,6 +39,7 @@ extern "C"
 
 static void SystemClock_Config(void);
 
+
 /* File-local constants ------------------------------------------------------*/
 
 /// Heartbeat toggle period (500 ms on + 500 ms off = 1 Hz blink).
@@ -49,6 +50,7 @@ static Console console(&huart4);
 
 // Single-byte RX staging buffer for interrupt-driven receive.
 static uint8_t s_rxByte;
+
 
 /* Entry point ---------------------------------------------------------------*/
 
@@ -92,6 +94,7 @@ int main(void)
   }
 }
 
+
 /* UART RX interrupt callback -------------------------------------------------*/
 
 /**
@@ -109,6 +112,7 @@ extern "C" void HAL_UART_RxCpltCallback(UART_HandleTypeDef* huart)
     HAL_UART_Receive_IT(&huart4, &s_rxByte, 1U);
   }
 }
+
 
 /* Private helpers -----------------------------------------------------------*/
 
@@ -174,5 +178,6 @@ static void SystemClock_Config(void)
 
   __HAL_FLASH_SET_PROGRAM_DELAY(FLASH_PROGRAMMING_DELAY_2);
 }
+
 
 /* EOF -----------------------------------------------------------------------*/
