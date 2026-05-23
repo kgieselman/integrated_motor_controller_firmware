@@ -6,11 +6,6 @@
  ******************************************************************************/
 
 #include "Console.hpp"
-#include "stm32h5xx_hal.h"
-
-// CubeMX-generated USB CDC transmit function.
-// Declared here to avoid pulling in the full USB Device header tree.
-extern "C" uint8_t CDC_Transmit_FS(uint8_t* Buf, uint16_t Len);
 
 #include <cstring>
 #include <cstdio>
@@ -44,8 +39,9 @@ static int s_strncasecmp(const char* a, const char* b, std::size_t n)
   return 0;
 }
 
-Console::Console()
-  : m_commandCount(0U)
+Console::Console(UART_HandleTypeDef* uart)
+  : m_uart(uart)
+  , m_commandCount(0U)
   , m_lineIdx(0U)
   , m_lineReady(false)
 {
@@ -75,7 +71,7 @@ void Console::feed(const uint8_t* buf, uint32_t len)
     char c = static_cast<char>(buf[i]);
 
     // Echo character back to the terminal.
-    CDC_Transmit_FS(reinterpret_cast<uint8_t*>(&c), 1U);
+    HAL_UART_Transmit(m_uart, reinterpret_cast<uint8_t*>(&c), 1U, HAL_MAX_DELAY);
 
     if (c == '\r' || c == '\n')
     {
@@ -128,10 +124,10 @@ void Console::print(const char* str)
   uint16_t len = static_cast<uint16_t>(strlen(str));
   if (len > 0U)
   {
-    // CDC_Transmit_FS takes a non-const pointer.
-    CDC_Transmit_FS(reinterpret_cast<uint8_t*>(const_cast<char*>(str)), len);
-    // Brief busy-wait for USB to flush (acceptable for bring-up debug console).
-    HAL_Delay(1U);
+    HAL_UART_Transmit(m_uart,
+                      reinterpret_cast<const uint8_t*>(str),
+                      len,
+                      HAL_MAX_DELAY);
   }
 }
 

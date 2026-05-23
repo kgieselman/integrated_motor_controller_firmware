@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
-# scripts/flash.sh — Flash firmware to the board via OpenOCD or STM32CubeProgrammer
+# scripts/flash.sh — Flash firmware to the board via OpenOCD, STM32CubeProgrammer,
+#                    or dfu-util
 #
 # !! Run this on the HOST, not inside the container !!
 # The container does not have USB/ST-Link access by default. If you want to
@@ -11,6 +12,8 @@
 #   openocd     — uses OpenOCD + stm32h5x.cfg (requires OpenOCD >= 0.12.0 with H5 support)
 #   cubeprog    — uses STM32_Programmer_CLI (always supports ST MCUs; installed with
 #                 STM32CubeIDE or STM32CubeProgrammer)
+#   dfu         — uses dfu-util over USB DFU bootloader (device must be in DFU mode;
+#                 flashes the .bin file at 0x08000000 via DfuSe)
 #   auto        — tries OpenOCD first; falls back to cubeprog if stm32h5x.cfg is missing
 #
 # Prerequisites (host):
@@ -18,6 +21,9 @@
 #                    xPack: https://github.com/xpack-binaries/openocd/releases)
 #   CubeProg path:   STM32_Programmer_CLI on PATH, or installed at the default Windows location:
 #                    C:\Program Files\STMicroelectronics\STM32Cube\STM32CubeProgrammer\bin
+#   dfu-util path:   dfu-util must be on PATH (sudo apt install dfu-util / brew install dfu-util)
+#                    Device must be in DFU mode: hold BOOT0 while powering on (or BOOT0 pin high
+#                    on reset), then confirm with: dfu-util --list
 #
 # Usage:
 #   scripts/flash.sh [options]
@@ -26,8 +32,10 @@
 #   -t, --target <name>          Firmware target to flash (default: imc_bringup)
 #                                Valid targets: imc_bringup, imc_tactical
 #   -b, --build-dir <dir>        Build output directory (default: build)
-#   -p, --programmer <tool>      Force programmer: openocd | cubeprog | auto (default: auto)
-#   --no-verify                  Skip flash verification
+#   -p, --programmer <tool>      Force programmer: openocd | cubeprog | dfu | auto (default: auto)
+#   --dfu-vid-pid <vid:pid>      USB VID:PID for dfu-util (default: 0483:df11 — STM32 DFU)
+#   --dfu-alt <n>                DFU alternate interface index (default: 0)
+#   --no-verify                  Skip flash verification (not supported by dfu-util)
 #   --no-reset                   Do not reset the MCU after flashing
 #   -h, --help                   Print this message
 #
@@ -36,6 +44,8 @@
 #   scripts/flash.sh --target imc_tactical
 #   scripts/flash.sh --programmer cubeprog
 #   scripts/flash.sh --programmer openocd --no-verify
+#   scripts/flash.sh --programmer dfu
+#   scripts/flash.sh --programmer dfu --no-reset
 # =============================================================================
 
 set -euo pipefail
@@ -48,6 +58,8 @@ BUILD_DIR="build"
 VERIFY="1"
 RESET="1"
 PROGRAMMER="auto"
+DFU_VID_PID="0483:df11"
+DFU_ALT="0"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # ---------------------------------------------------------------------------
@@ -55,13 +67,15 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # ---------------------------------------------------------------------------
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -t|--target)      TARGET="$2";     shift 2 ;;
-        -b|--build-dir)   BUILD_DIR="$2";  shift 2 ;;
-        -p|--programmer)  PROGRAMMER="$2"; shift 2 ;;
-        --no-verify)      VERIFY="";       shift   ;;
-        --no-reset)       RESET="";        shift   ;;
+        -t|--target)       TARGET="$2";       shift 2 ;;
+        -b|--build-dir)    BUILD_DIR="$2";    shift 2 ;;
+        -p|--programmer)   PROGRAMMER="$2";   shift 2 ;;
+        --dfu-vid-pid)     DFU_VID_PID="$2";  shift 2 ;;
+        --dfu-alt)         DFU_ALT="$2";      shift 2 ;;
+        --no-verify)       VERIFY="";         shift   ;;
+        --no-reset)        RESET="";          shift   ;;
         -h|--help)
-            sed -n '3,46p' "$0"
+            sed -n '3,57p' "$0"
             exit 0
             ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
@@ -74,14 +88,15 @@ cd "$REPO_ROOT"
 # Validate programmer selection
 # ---------------------------------------------------------------------------
 case "$PROGRAMMER" in
-    auto|openocd|cubeprog) ;;
-    *) echo "Error: unknown --programmer value '${PROGRAMMER}' (openocd | cubeprog | auto)" >&2; exit 1 ;;
+    auto|openocd|cubeprog|dfu) ;;
+    *) echo "Error: unknown --programmer value '${PROGRAMMER}' (openocd | cubeprog | dfu | auto)" >&2; exit 1 ;;
 esac
 
 # ---------------------------------------------------------------------------
-# Resolve the ELF path
+# Resolve artifact paths
 # ---------------------------------------------------------------------------
 ELF="${BUILD_DIR}/${TARGET}.elf"
+BIN="${BUILD_DIR}/${TARGET}.bin"
 
 if [[ ! -f "$ELF" ]]; then
     echo "Error: ELF not found at ${ELF}" >&2
@@ -126,13 +141,31 @@ find_cubeprog() {
     return 1
 }
 
+# Returns 0 and prints the dfu-util path if found on PATH, non-zero otherwise.
+find_dfuutil() {
+    command -v dfu-util &>/dev/null || return 1
+    command -v dfu-util
+}
+
 # ---------------------------------------------------------------------------
 # Select programmer
 # ---------------------------------------------------------------------------
 TOOL=""
 TOOL_NAME=""
 
-if [[ "$PROGRAMMER" == "openocd" || "$PROGRAMMER" == "auto" ]]; then
+if [[ "$PROGRAMMER" == "dfu" ]]; then
+    if TOOL=$(find_dfuutil 2>/dev/null); then
+        TOOL_NAME="dfu"
+    else
+        echo "Error: dfu-util not found on PATH." >&2
+        echo "       Install it with: sudo apt install dfu-util" >&2
+        echo "       Then put the device in DFU mode (BOOT0 high on reset) and verify" >&2
+        echo "       it is detected with: dfu-util --list" >&2
+        exit 1
+    fi
+fi
+
+if [[ -z "$TOOL_NAME" && ( "$PROGRAMMER" == "openocd" || "$PROGRAMMER" == "auto" ) ]]; then
     if TOOL=$(find_openocd 2>/dev/null); then
         TOOL_NAME="openocd"
     elif [[ "$PROGRAMMER" == "openocd" ]]; then
@@ -163,13 +196,17 @@ if [[ -z "$TOOL_NAME" ]]; then
     echo "" >&2
     echo "  Option B — STM32CubeProgrammer (always supports ST MCUs):" >&2
     echo "    https://www.st.com/en/development-tools/stm32cubeprog.html" >&2
+    echo "" >&2
+    echo "  Option C — dfu-util (USB DFU bootloader, device must be in DFU mode):" >&2
+    echo "    Linux:  sudo apt install dfu-util" >&2
+    echo "    macOS:  brew install dfu-util" >&2
     exit 1
 fi
 
 # ---------------------------------------------------------------------------
 # Flash
 # ---------------------------------------------------------------------------
-echo ">>> Flashing ${ELF} to STM32H563 via ST-Link (${TOOL_NAME})"
+echo ">>> Flashing ${ELF} to STM32H563 via ${TOOL_NAME}"
 
 if [[ "$TOOL_NAME" == "openocd" ]]; then
     OCD_CMDS="program ${ELF}"
@@ -184,7 +221,7 @@ if [[ "$TOOL_NAME" == "openocd" ]]; then
         -f target/stm32h5x.cfg \
         -c "$OCD_CMDS"
 
-else  # cubeprog
+elif [[ "$TOOL_NAME" == "cubeprog" ]]; then
     CP_ARGS=(-c port=SWD -w "$ELF")
     [[ -n "$VERIFY" ]] && CP_ARGS+=(-v)
     [[ -n "$RESET"  ]] && CP_ARGS+=(-rst)
@@ -192,6 +229,28 @@ else  # cubeprog
     echo "    STM32_Programmer_CLI ${CP_ARGS[*]}"
     echo ""
     "$TOOL" "${CP_ARGS[@]}"
+
+else  # dfu
+    if [[ ! -f "$BIN" ]]; then
+        echo "Error: .bin file not found at ${BIN}" >&2
+        echo "       dfu-util requires a flat binary. Generate it with:" >&2
+        echo "         arm-none-eabi-objcopy -O binary ${ELF} ${BIN}" >&2
+        exit 1
+    fi
+
+    if [[ -n "$VERIFY" ]]; then
+        echo "Note: dfu-util does not support in-tool verification; --no-verify has no effect." >&2
+    fi
+
+    # Build the DfuSe address string: append :leave to auto-reset after flash
+    DFUSE_ADDR="0x08000000"
+    [[ -n "$RESET" ]] && DFUSE_ADDR+=":leave"
+
+    DFU_ARGS=(-d "${DFU_VID_PID}" -a "${DFU_ALT}" --dfuse-address "${DFUSE_ADDR}" -D "${BIN}")
+
+    echo "    dfu-util ${DFU_ARGS[*]}"
+    echo ""
+    dfu-util "${DFU_ARGS[@]}"
 fi
 
 echo ""
