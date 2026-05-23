@@ -145,6 +145,7 @@ set(APP_Bringup_Src
     ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/EncoderTest.cpp
     ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/BatteryTest.cpp
     ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/EepromTest.cpp
+    ${CMAKE_SOURCE_DIR}/drivers/src/EEPROM.cpp
     ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/ServoTest.cpp
     ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/CrsfTest.cpp
     ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/LedTest.cpp
