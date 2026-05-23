@@ -35,6 +35,7 @@ extern "C"
 #include "Console.hpp"
 #include "tests/BatteryTest.hpp"
 #include "tests/CrsfTest.hpp"
+#include "tests/LedTest.hpp"
 #include "tests/EepromTest.hpp"
 #include "tests/EncoderTest.hpp"
 #include "tests/ImuTest.hpp"
@@ -91,6 +92,7 @@ int main(void)
   registerEepromTests(console);
   registerServoTests(console);
   registerCrsfTests(console);
+  registerLedTests(console);
 
   console.printAbout();
   console.printHelp();
