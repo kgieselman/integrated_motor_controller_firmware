@@ -1,10 +1,11 @@
 /*******************************************************************************
  * @file IMU.hpp
- * @brief ICM-42688-P 6-axis IMU driver over SPI.
+ * @brief LSM6DSV 6-axis IMU driver over SPI.
  *
- * The ICM-42688-P communicates over SPI in mode 0 or mode 3 (CPOL=CPHA).
- * CubeMX should configure the SPI peripheral in full-duplex master mode at
- * ≤ 24 MHz (register access) or ≤ 24 MHz (sensor data burst).
+ * The LSM6DSV communicates over SPI in mode 3 (CPOL=1, CPHA=1) at a maximum
+ * of 10 MHz. The CubeMX SPI1 peripheral must be configured with
+ * BaudRatePrescaler ≥ 16 when sourced from PLL1Q (125 MHz) to stay at or
+ * below 10 MHz.
  *
  * Pin assignments (from integrated_motor_controller.ioc):
  *  - SCK  : PB3  (SPI1 SCK)
@@ -16,9 +17,10 @@
  *
  * Usage:
  * @code
- *   IMU imu(&hspi1, GPIOA, GPIO_PIN_15);
+ *   IMU imu(&hspi1, IMU_SPI_CS_GPIO_Port, IMU_SPI_CS_Pin);
  *   imu.init();
- *   auto data = imu.read();
+ *   AccelGyro sample{};
+ *   imu.read(sample);
  * @endcode
  *
  * @author Integrated Motor Controller firmware team
@@ -47,7 +49,22 @@ struct AccelGyro
 };
 
 /**
- * @brief ICM-42688-P driver (SPI, polling mode).
+ * @brief Game rotation vector output from the SFLP sensor fusion block.
+ *
+ * The quaternion is a unit quaternion (x,y,z,w) representing orientation
+ * relative to an arbitrary initial heading. w is computed from x,y,z as
+ * √(1 − x²−y²−z²).
+ */
+struct Quaternion
+{
+  float x;
+  float y;
+  float z;
+  float w;
+};
+
+/**
+ * @brief LSM6DSV driver (SPI, polling mode).
  *
  * All register transactions are blocking (HAL_SPI_TransmitReceive with a
  * short timeout). For the tactical firmware, consider DMA-driven burst reads
@@ -56,8 +73,8 @@ struct AccelGyro
 class IMU
 {
 public:
-  /// Expected WHO_AM_I register value for ICM-42688-P.
-  static constexpr uint8_t kWhoAmIValue = 0x47U;
+  /// Expected WHO_AM_I register value for the LSM6DSV.
+  static constexpr uint8_t kWhoAmIValue = 0x70U;
 
   /**
    * @brief Construct an IMU driver.
@@ -71,12 +88,12 @@ public:
       uint16_t           csPin);
 
   /**
-   * @brief Initialise the ICM-42688-P.
+   * @brief Initialise the LSM6DSV.
    *
    * Verifies WHO_AM_I, soft-resets the device, and configures:
-   *  - Accelerometer: ±16 g range, 1 kHz ODR
-   *  - Gyroscope:     ±2000 °/s range, 1 kHz ODR
-   *  - INT1 pin as data-ready (active-high, push-pull)
+   *  - Accelerometer: ±8 g range, 960 Hz ODR, high-performance mode
+   *  - Gyroscope:     ±2000 °/s range, 960 Hz ODR, high-performance mode
+   *  - Block data update enabled for coherent register reads
    *
    * @return true on success, false if WHO_AM_I does not match or SPI fails.
    */
@@ -85,7 +102,7 @@ public:
   /**
    * @brief Read one accel + gyro sample via a burst SPI transaction.
    *
-   * Reads 12 bytes starting at ACCEL_DATA_X1 and converts to physical units.
+   * Reads 12 bytes starting at OUTX_L_G and converts to physical units.
    *
    * @param[out] out  Struct to populate with calibrated sensor data.
    * @return true on success, false on SPI error.
@@ -97,63 +114,53 @@ public:
    *
    * Useful as a bring-up sanity check without calling init().
    *
-   * @return WHO_AM_I byte, or 0xFF on SPI error.
+   * @return WHO_AM_I byte (0x70 expected), or 0xFF on SPI error.
    */
   uint8_t whoAmI();
 
   /**
-   * @brief Check whether a data-ready interrupt is pending.
+   * @brief Check whether both accel and gyro data-ready flags are set.
    *
-   * Reads the INT_STATUS register bit. Alternative to using the INT1 EXTI line.
+   * Reads STATUS_REG and checks the XLDA and GDA bits.
    *
-   * @return true if new data is available.
+   * @return true if new data is available for both sensors.
    */
   bool dataReady();
 
+  /**
+   * @brief Enable the SFLP sensor fusion block and route its output to the FIFO.
+   *
+   * Must be called after init(). Configures:
+   *  - SFLP game rotation vector at 120 Hz
+   *  - FIFO in continuous mode, batching game RV, gravity, and gyro bias entries
+   *
+   * @return true on success, false on SPI error.
+   */
+  bool enableFusion();
+
+  /**
+   * @brief Read the latest game rotation vector from the FIFO.
+   *
+   * Drains all pending FIFO entries and returns the most recent quaternion.
+   *
+   * @param[out] out  Quaternion to populate.
+   * @return true if at least one game rotation vector entry was found.
+   */
+  bool readFusion(Quaternion& out);
+
 private:
-  SPI_HandleTypeDef* m_hspi;       ///< HAL SPI handle.
-  GPIO_TypeDef*      m_csPort;     ///< GPIO port for the chip-select pin.
-  uint16_t           m_csPin;      ///< GPIO pin mask for the chip-select pin.
+  SPI_HandleTypeDef* m_hspi;
+  GPIO_TypeDef*      m_csPort;
+  uint16_t           m_csPin;
 
   float m_accelScale; ///< LSB → m/s² scale factor (set during init).
   float m_gyroScale;  ///< LSB → °/s  scale factor (set during init).
 
-  /**
-   * @brief Assert the CS pin (drive low).
-   */
   void csAssert();
-
-  /**
-   * @brief Deassert the CS pin (drive high).
-   */
   void csDeassert();
 
-  /**
-   * @brief Write one register byte.
-   *
-   * @param reg   7-bit register address.
-   * @param value Byte to write.
-   * @return true on HAL_OK.
-   */
   bool writeReg(uint8_t reg, uint8_t value);
-
-  /**
-   * @brief Read one register byte.
-   *
-   * @param reg       7-bit register address.
-   * @param[out] out  Byte read from the device.
-   * @return true on HAL_OK.
-   */
   bool readReg(uint8_t reg, uint8_t& out);
-
-  /**
-   * @brief Burst-read multiple consecutive registers.
-   *
-   * @param reg    Starting register address.
-   * @param buf    Output buffer.
-   * @param len    Number of bytes to read.
-   * @return true on HAL_OK.
-   */
   bool readBurst(uint8_t reg, uint8_t* buf, uint16_t len);
 };
 

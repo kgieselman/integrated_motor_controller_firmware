@@ -147,6 +147,7 @@ set(APP_Bringup_Src
     ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/BatteryTest.cpp
     ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/EepromTest.cpp
     ${CMAKE_SOURCE_DIR}/drivers/src/EEPROM.cpp
+    ${CMAKE_SOURCE_DIR}/drivers/src/IMU.cpp
     ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/ServoTest.cpp
     ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/CrsfTest.cpp
     ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/LedTest.cpp
@@ -165,7 +166,7 @@ target_include_directories(imc_bringup PRIVATE
 )
 target_compile_definitions(imc_bringup PRIVATE ${MX_Defines_Syms})
 target_link_libraries(imc_bringup PRIVATE STM32_Drivers m)
-target_link_options(imc_bringup PRIVATE -Wl,-Map=${CMAKE_BINARY_DIR}/imc_bringup.map)
+target_link_options(imc_bringup PRIVATE -Wl,-Map=${CMAKE_BINARY_DIR}/imc_bringup.map -u _printf_float)
 set_target_properties(imc_bringup PROPERTIES
     ADDITIONAL_CLEAN_FILES ${CMAKE_BINARY_DIR}/imc_bringup.map
 )
