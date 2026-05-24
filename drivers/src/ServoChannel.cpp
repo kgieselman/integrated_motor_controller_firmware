@@ -20,7 +20,10 @@ ServoChannel::ServoChannel(TIM_HandleTypeDef* htim,
 
 bool ServoChannel::init()
 {
-  // Start PWM, then immediately write the centre pulse.
+  // Stop first so re-initialisation is safe — HAL_TIM_PWM_Start fails if the
+  // channel is already running (state != READY).
+  HAL_TIM_PWM_Stop(m_htim, m_channel);
+
   if (HAL_TIM_PWM_Start(m_htim, m_channel) != HAL_OK)
   {
     return false;

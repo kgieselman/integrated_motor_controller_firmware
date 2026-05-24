@@ -14,7 +14,7 @@
 #                 STM32CubeIDE or STM32CubeProgrammer)
 #   dfu         — uses dfu-util over USB DFU bootloader (device must be in DFU mode;
 #                 flashes the .bin file at 0x08000000 via DfuSe)
-#   auto        — tries OpenOCD first; falls back to cubeprog if stm32h5x.cfg is missing
+#   auto        — tries OpenOCD first, then cubeprog, then dfu-util as a last resort
 #
 # Prerequisites (host):
 #   OpenOCD path:    openocd must be on PATH (sudo apt install openocd / brew install openocd /
@@ -183,6 +183,12 @@ if [[ -z "$TOOL_NAME" && ( "$PROGRAMMER" == "cubeprog" || "$PROGRAMMER" == "auto
         echo "Error: STM32_Programmer_CLI not found." >&2
         echo "       Install STM32CubeProgrammer: https://www.st.com/en/development-tools/stm32cubeprog.html" >&2
         exit 1
+    fi
+fi
+
+if [[ -z "$TOOL_NAME" && "$PROGRAMMER" == "auto" ]]; then
+    if TOOL=$(find_dfuutil 2>/dev/null); then
+        TOOL_NAME="dfu"
     fi
 fi
 
