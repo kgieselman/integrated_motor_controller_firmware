@@ -54,8 +54,8 @@ static void SystemClock_Config(void);
 /// Heartbeat toggle period (500 ms on + 500 ms off = 1 Hz blink).
 static constexpr uint32_t kHeartbeatPeriodMs = 500U;
 
-// Console instance — swap to &huart1 once the USART1 connector is populated.
-static Console console(&huart4);
+// Console instance — using USART1 connector.
+static Console console(&huart1);
 
 // Single-byte RX staging buffer for interrupt-driven receive.
 static uint8_t s_rxByte;
@@ -84,7 +84,7 @@ int main(void)
   MX_TIM8_Init();
 
   // Arm the first UART RX interrupt — re-armed in HAL_UART_RxCpltCallback.
-  HAL_UART_Receive_IT(&huart4, &s_rxByte, 1U);
+  HAL_UART_Receive_IT(&huart1, &s_rxByte, 1U);
 
   registerBuzzerTests(console);
   registerImuTests(console);
@@ -121,15 +121,13 @@ int main(void)
  * @brief Called by HAL when a UART RX interrupt fires.
  *
  * Feeds the received byte into the console and re-arms for the next byte.
- * Swap huart4 → huart1 (and &huart4 → &huart1) when the USART1 connector
- * is populated.
  */
 extern "C" void HAL_UART_RxCpltCallback(UART_HandleTypeDef* huart)
 {
-  if (huart->Instance == UART4)
+  if (huart->Instance == USART1)
   {
     console.feed(&s_rxByte, 1U);
-    HAL_UART_Receive_IT(&huart4, &s_rxByte, 1U);
+    HAL_UART_Receive_IT(&huart1, &s_rxByte, 1U);
   }
 }
 
