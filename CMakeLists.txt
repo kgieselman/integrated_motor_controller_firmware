@@ -84,9 +84,9 @@ target_include_directories(STM32_Drivers PUBLIC ${MX_Include_Dirs})
 target_compile_definitions(STM32_Drivers PUBLIC ${MX_Defines_Syms})
 
 # ---------------------------------------------------------------------------
-# CubeMX peripheral init — shared across both targets
-# Note: stm32h5xx_it.c and stm32h5xx_hal_msp.c may need to diverge if
-# bringup and tactical require different IRQ or MSP configurations.
+# CubeMX peripheral init — shared by every application target
+# Note: stm32h5xx_hal_msp.c may need to diverge if a future target requires a
+# different MSP configuration.
 # ---------------------------------------------------------------------------
 set(MX_Periph_Src
     ${CUBEMX_DIR}/Core/Src/gpio.c
@@ -103,8 +103,10 @@ set(MX_Periph_Src
     ${CUBEMX_DIR}/Core/Src/syscalls.c
     ${CUBEMX_DIR}/startup_stm32h563xx.s
 )
-# stm32h5xx_it.c is target-specific: bringup uses the CubeMX version,
-# tactical uses stm32h5xx_it_tactical.c (FreeRTOS owns SVC/PendSV/SysTick).
+# stm32h5xx_it.c is target-specific and deliberately not listed here: tactical
+# uses stm32h5xx_it_tactical.c instead, because the FreeRTOS port owns
+# SVC_Handler, PendSV_Handler and SysTick_Handler. The CubeMX version is left
+# in cubemx/ as generated reference; it is not compiled by any target.
 
 # Remove spurious libob.a pulled in by some gcc-arm-none-eabi versions
 list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)
@@ -134,47 +136,43 @@ set(FREERTOS_HEAP 4                           CACHE STRING "FreeRTOS heap implem
 FetchContent_MakeAvailable(freertos_kernel)
 
 # ---------------------------------------------------------------------------
-# Target: imc_bringup
-# Interactive USB-CDC console for hardware validation (11-stage checklist)
+# Library: imc_drivers
+# Hand-written hardware drivers, shared by every application target.
+#
+# Every .cpp under drivers/ belongs to this list. A driver that is not listed
+# is a driver nobody compiles — which is exactly how the stale pin references
+# in Encoder and Drivetrain survived unnoticed. Add a file to drivers/, add it
+# here in the same commit.
 # ---------------------------------------------------------------------------
-set(APP_Bringup_Src
-    ${CMAKE_SOURCE_DIR}/app/bringup/src/main_bringup.cpp
-    ${CMAKE_SOURCE_DIR}/app/bringup/src/Console.cpp
-    ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/BuzzerTest.cpp
-    ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/ImuTest.cpp
-    ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/MotorTest.cpp
-    ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/EncoderTest.cpp
-    ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/BatteryTest.cpp
-    ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/EepromTest.cpp
+set(IMC_Drivers_Src
+    ${CMAKE_SOURCE_DIR}/drivers/src/AdcDma.cpp
+    ${CMAKE_SOURCE_DIR}/drivers/src/Battery.cpp
+    ${CMAKE_SOURCE_DIR}/drivers/src/Buzzer.cpp
+    ${CMAKE_SOURCE_DIR}/drivers/src/Console.cpp
+    ${CMAKE_SOURCE_DIR}/drivers/src/CRSFReceiver.cpp
+    ${CMAKE_SOURCE_DIR}/drivers/src/Drivetrain.cpp
     ${CMAKE_SOURCE_DIR}/drivers/src/EEPROM.cpp
+    ${CMAKE_SOURCE_DIR}/drivers/src/Encoder.cpp
     ${CMAKE_SOURCE_DIR}/drivers/src/IMU.cpp
+    ${CMAKE_SOURCE_DIR}/drivers/src/Led.cpp
+    ${CMAKE_SOURCE_DIR}/drivers/src/Motor.cpp
     ${CMAKE_SOURCE_DIR}/drivers/src/ServoChannel.cpp
-    ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/ServoTest.cpp
-    ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/CrsfTest.cpp
-    ${CMAKE_SOURCE_DIR}/app/bringup/src/tests/LedTest.cpp
 )
 
-add_executable(imc_bringup)
-target_sources(imc_bringup PRIVATE
-    ${MX_Periph_Src}
-    ${CUBEMX_DIR}/Core/Src/stm32h5xx_it.c
-    ${APP_Bringup_Src}
-)
-target_include_directories(imc_bringup PRIVATE
+# STATIC rather than OBJECT: -ffunction-sections, -fdata-sections and
+# -Wl,--gc-sections are already set, so an executable pulls in only the
+# drivers it actually references.
+add_library(imc_drivers STATIC ${IMC_Drivers_Src})
+target_include_directories(imc_drivers PUBLIC
     ${MX_Include_Dirs}
-    ${CMAKE_SOURCE_DIR}/app/bringup/include
     ${CMAKE_SOURCE_DIR}/drivers/include
 )
-target_compile_definitions(imc_bringup PRIVATE ${MX_Defines_Syms})
-target_link_libraries(imc_bringup PRIVATE STM32_Drivers m)
-target_link_options(imc_bringup PRIVATE -Wl,-Map=${CMAKE_BINARY_DIR}/imc_bringup.map -u _printf_float)
-set_target_properties(imc_bringup PROPERTIES
-    ADDITIONAL_CLEAN_FILES ${CMAKE_BINARY_DIR}/imc_bringup.map
-)
+target_compile_definitions(imc_drivers PUBLIC ${MX_Defines_Syms})
+target_link_libraries(imc_drivers PUBLIC STM32_Drivers)
 
 # ---------------------------------------------------------------------------
 # Target: imc_tactical
-# Competition / mission control firmware (FreeRTOS to be added)
+# Competition / mission control firmware
 # ---------------------------------------------------------------------------
 set(APP_Tactical_Src
     ${CMAKE_SOURCE_DIR}/app/tactical/src/main_tactical.cpp
@@ -192,8 +190,10 @@ target_include_directories(imc_tactical PRIVATE
     ${CMAKE_SOURCE_DIR}/app/tactical/include
 )
 target_compile_definitions(imc_tactical PRIVATE ${MX_Defines_Syms})
-target_link_libraries(imc_tactical PRIVATE STM32_Drivers freertos_kernel m)
-target_link_options(imc_tactical PRIVATE -Wl,-Map=${CMAKE_BINARY_DIR}/imc_tactical.map)
+target_link_libraries(imc_tactical PRIVATE imc_drivers STM32_Drivers freertos_kernel m)
+# -u _printf_float pulls in newlib's float formatting, which Console::printf
+# needs for "%f". Without it a float prints as an empty field.
+target_link_options(imc_tactical PRIVATE -Wl,-Map=${CMAKE_BINARY_DIR}/imc_tactical.map -u _printf_float)
 set_target_properties(imc_tactical PROPERTIES
     ADDITIONAL_CLEAN_FILES ${CMAKE_BINARY_DIR}/imc_tactical.map
 )
