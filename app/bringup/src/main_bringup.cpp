@@ -115,7 +115,7 @@ int main(void)
 }
 
 
-/* UART RX interrupt callback -------------------------------------------------*/
+/* UART RX interrupt callbacks -----------------------------------------------*/
 
 /**
  * @brief Called by HAL when a UART RX interrupt fires.
@@ -128,6 +128,19 @@ extern "C" void HAL_UART_RxCpltCallback(UART_HandleTypeDef* huart)
   {
     console.feed(&s_rxByte, 1U);
     HAL_UART_Receive_IT(&huart1, &s_rxByte, 1U);
+  }
+}
+
+/**
+ * @brief Called by HAL when a UART DMA transfer completes or the line goes idle.
+ *
+ * Routes UART4 events (CRSF/ELRS receiver) to CRSFReceiver::onDmaRxEvent().
+ */
+extern "C" void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef* huart, uint16_t size)
+{
+  if (huart->Instance == UART4)
+  {
+    crsfOnDmaRxEvent(size);
   }
 }
 
