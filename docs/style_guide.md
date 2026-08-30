@@ -9,7 +9,37 @@ state of this guide.
 
 ## 1. Language Standard and Compiler Flags
 
-- Compile as **C++17** (`-std=c++17`).
+- Compile as **C++20** (`-std=c++20`).
+
+  C++20 was adopted deliberately, for two features. Use them; the rest of the
+  standard's additions are not endorsed by default.
+
+  - **Designated initializers.** Aggregate initialisation names its fields:
+    `PidGains{.kp = 1.2f, .ki = 0.0f, .kd = 0.05f}`. Prefer this anywhere a
+    struct carries more than two fields, and especially throughout
+    `app/tactical/config/`, whose whole job is to be read rather than executed.
+  - **`std::span`.** Replaces every `(pointer, length)` parameter pair. A
+    `std::span<uint8_t>` cannot silently ignore its length the way a raw pointer
+    plus a `len` argument can.
+
+  Also fine where they read better: `<bit>` (`std::bit_cast`,
+  `std::countl_zero`) in place of `reinterpret_cast` or `memcpy` for register
+  and protocol bit-twiddling; `constinit` on statically allocated objects;
+  `using enum` inside switch-heavy state machines.
+
+  **Do not use**, notwithstanding that the standard offers them:
+
+  - **Coroutines** — the frame is heap-allocated by default, which contradicts
+    the no-heap-after-boot rule. The custom-allocator workaround costs more
+    clarity than the plain state machine it would replace.
+  - **`<ranges>` and `std::format`** — both carry real code size on
+    newlib-nano. Use a `snprintf`-style formatter.
+  - **Modules** — not usable with this CMake and toolchain setup.
+
+  C++23 is deliberately not adopted: `std::expected` would suit the `bool init()`
+  convention well, but arm-none-eabi-gcc 13.2 (what `ubuntu:24.04` ships) does not
+  have it, and pinning a newer toolchain for one feature is not worth the CI
+  fragility. Revisit when the base image moves.
 - Always compile with **`-fno-exceptions`** and **`-fno-rtti`**. No code in
   this codebase may throw or catch exceptions, or use `typeid` / `dynamic_cast`.
 - Fixed-width integer types (`uint8_t`, `int32_t`, etc.) from `<cstdint>` are

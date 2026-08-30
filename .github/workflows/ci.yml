@@ -25,13 +25,6 @@ jobs:
             imc-firmware-dev \
             scripts/build.sh --target all --type Debug
 
-      - name: Build Release (bringup)
-        run: |
-          docker run --rm \
-            -v "${{ github.workspace }}:/workspace" \
-            imc-firmware-dev \
-            scripts/build.sh --target imc_bringup --type Release
-
       - name: Build Release (tactical)
         run: |
           docker run --rm \

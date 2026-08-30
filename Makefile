@@ -5,7 +5,6 @@
 #   make image           Build (or rebuild) the dev container image
 #   make configure       Run CMake configure
 #   make build           Configure (if needed) + compile all targets
-#   make build-bringup   Build imc_bringup only
 #   make build-tactical  Build imc_tactical only
 #   make rebuild         Wipe build dir + full recompile
 #   make shell           Interactive shell in the container
@@ -14,8 +13,7 @@
 #   make clean           Remove the build/ directory
 #
 # Host targets (run on your machine — require openocd + ST-Link):
-#   make flash           Flash imc_bringup via OpenOCD
-#   make flash-bringup   Flash imc_bringup via OpenOCD
+#   make flash           Flash imc_tactical via OpenOCD
 #   make flash-tactical  Flash imc_tactical via OpenOCD
 #
 # Pass extra CMake args via:  make build CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release"
@@ -56,10 +54,6 @@ configure:
 build:
 	$(DOCKER_RUN) scripts/build.sh
 
-.PHONY: build-bringup
-build-bringup:
-	$(DOCKER_RUN) scripts/build.sh --target imc_bringup
-
 .PHONY: build-tactical
 build-tactical:
 	$(DOCKER_RUN) scripts/build.sh --target imc_tactical
@@ -93,11 +87,8 @@ shell:
 # ---------------------------------------------------------------------------
 # Flash — runs on the HOST (openocd needs USB access to the ST-Link)
 # ---------------------------------------------------------------------------
-.PHONY: flash flash-bringup flash-tactical
-flash: flash-bringup
-
-flash-bringup:
-	scripts/flash.sh --target imc_bringup
+.PHONY: flash flash-tactical
+flash: flash-tactical
 
 flash-tactical:
 	scripts/flash.sh --target imc_tactical
@@ -122,7 +113,6 @@ help:
 	@echo "  make image           Build the dev container image"
 	@echo "  make configure       Run CMake configure"
 	@echo "  make build           Configure (if needed) + compile all"
-	@echo "  make build-bringup   Build imc_bringup only"
 	@echo "  make build-tactical  Build imc_tactical only"
 	@echo "  make rebuild         Clean + full recompile"
 	@echo "  make cppcheck        Run cppcheck static analysis (always exits 0)"
@@ -131,8 +121,7 @@ help:
 	@echo "  make clean           Delete build/"
 	@echo ""
 	@echo "Host targets (require openocd + ST-Link on your machine):"
-	@echo "  make flash           Flash imc_bringup (default)"
-	@echo "  make flash-bringup   Flash imc_bringup"
+	@echo "  make flash           Flash imc_tactical (default)"
 	@echo "  make flash-tactical  Flash imc_tactical"
 	@echo ""
 	@echo "Override CMake options:  make build CMAKE_ARGS=\"-DCMAKE_BUILD_TYPE=Release\""

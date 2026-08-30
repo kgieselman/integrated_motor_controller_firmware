@@ -29,8 +29,8 @@
 #   scripts/flash.sh [options]
 #
 # Options:
-#   -t, --target <name>          Firmware target to flash (default: imc_bringup)
-#                                Valid targets: imc_bringup, imc_tactical
+#   -t, --target <name>          Firmware target to flash (default: imc_tactical)
+#                                Valid targets: imc_tactical
 #   -b, --build-dir <dir>        Build output directory (default: build)
 #   -p, --programmer <tool>      Force programmer: openocd | cubeprog | dfu | auto (default: auto)
 #   --dfu-vid-pid <vid:pid>      USB VID:PID for dfu-util (default: 0483:df11 — STM32 DFU)
@@ -53,7 +53,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
-TARGET="imc_bringup"
+TARGET="imc_tactical"
 BUILD_DIR="build"
 VERIFY="1"
 RESET="1"
@@ -263,12 +263,15 @@ echo ""
 echo ">>> Flash complete."
 
 # ---------------------------------------------------------------------------
-# Helpful hint for the bringup console
+# Helpful hint for the console
 # ---------------------------------------------------------------------------
-if [[ "$TARGET" == "imc_bringup" ]]; then
+# The console is on USART1 (PB14 TX / PB15 RX) at 115200 baud, on the growth
+# header. This is a workaround for a connector shortage on Rev A; the intended
+# transport is USB-CDC.
+if [[ "$TARGET" == "imc_tactical" ]]; then
     echo ""
-    echo ">>> Connect to the USB-CDC console:"
-    echo "      Linux:   screen /dev/ttyACM0 115200"
-    echo "      macOS:   screen /dev/tty.usbmodem* 115200"
-    echo "      Windows: PuTTY on the enumerated COM port, 115200 baud"
+    echo ">>> Expected after reset:"
+    echo "      - one chirp from the buzzer"
+    echo "      - DEBUG_LED_0 (PC15) blinking at 1 Hz"
+    echo "      - console banner on USART1 @ 115200 8N1 (PB14 TX / PB15 RX)"
 fi

@@ -10,7 +10,7 @@
 #
 # Options:
 #   -t, --target <name>     CMake target to build (default: all)
-#                           Valid targets: imc_bringup, imc_tactical, all
+#                           Valid targets: imc_tactical, all
 #   -T, --type <type>       CMake build type (default: Debug)
 #                           Valid types: Debug, Release, MinSizeRel, RelWithDebInfo
 #   -j, --jobs <n>          Parallel jobs (default: nproc)
@@ -19,7 +19,6 @@
 #
 # Examples:
 #   scripts/build.sh
-#   scripts/build.sh --target imc_bringup
 #   scripts/build.sh --target imc_tactical --type Release
 #   scripts/build.sh --clean
 # =============================================================================

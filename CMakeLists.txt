@@ -5,7 +5,7 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS ON)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -145,17 +145,17 @@ FetchContent_MakeAvailable(freertos_kernel)
 # here in the same commit.
 # ---------------------------------------------------------------------------
 set(IMC_Drivers_Src
-    ${CMAKE_SOURCE_DIR}/drivers/src/AdcDma.cpp
-    ${CMAKE_SOURCE_DIR}/drivers/src/Battery.cpp
-    ${CMAKE_SOURCE_DIR}/drivers/src/Buzzer.cpp
-    ${CMAKE_SOURCE_DIR}/drivers/src/Console.cpp
-    ${CMAKE_SOURCE_DIR}/drivers/src/CRSFReceiver.cpp
-    ${CMAKE_SOURCE_DIR}/drivers/src/EEPROM.cpp
-    ${CMAKE_SOURCE_DIR}/drivers/src/Encoder.cpp
-    ${CMAKE_SOURCE_DIR}/drivers/src/IMU.cpp
-    ${CMAKE_SOURCE_DIR}/drivers/src/Led.cpp
-    ${CMAKE_SOURCE_DIR}/drivers/src/Motor.cpp
-    ${CMAKE_SOURCE_DIR}/drivers/src/ServoChannel.cpp
+    ${CMAKE_SOURCE_DIR}/drivers/AdcDma.cpp
+    ${CMAKE_SOURCE_DIR}/drivers/Battery.cpp
+    ${CMAKE_SOURCE_DIR}/drivers/Buzzer.cpp
+    ${CMAKE_SOURCE_DIR}/drivers/Console.cpp
+    ${CMAKE_SOURCE_DIR}/drivers/CRSFReceiver.cpp
+    ${CMAKE_SOURCE_DIR}/drivers/EEPROM.cpp
+    ${CMAKE_SOURCE_DIR}/drivers/Encoder.cpp
+    ${CMAKE_SOURCE_DIR}/drivers/IMU.cpp
+    ${CMAKE_SOURCE_DIR}/drivers/Led.cpp
+    ${CMAKE_SOURCE_DIR}/drivers/Motor.cpp
+    ${CMAKE_SOURCE_DIR}/drivers/ServoChannel.cpp
 )
 
 # STATIC rather than OBJECT: -ffunction-sections, -fdata-sections and
@@ -164,7 +164,7 @@ set(IMC_Drivers_Src
 add_library(imc_drivers STATIC ${IMC_Drivers_Src})
 target_include_directories(imc_drivers PUBLIC
     ${MX_Include_Dirs}
-    ${CMAKE_SOURCE_DIR}/drivers/include
+    ${CMAKE_SOURCE_DIR}/drivers
 )
 target_compile_definitions(imc_drivers PUBLIC ${MX_Defines_Syms})
 target_link_libraries(imc_drivers PUBLIC STM32_Drivers)
@@ -174,9 +174,9 @@ target_link_libraries(imc_drivers PUBLIC STM32_Drivers)
 # Competition / mission control firmware
 # ---------------------------------------------------------------------------
 set(APP_Tactical_Src
-    ${CMAKE_SOURCE_DIR}/app/tactical/src/main_tactical.cpp
-    ${CMAKE_SOURCE_DIR}/app/tactical/src/freertos_hooks.c
-    ${CMAKE_SOURCE_DIR}/app/tactical/src/stm32h5xx_it_tactical.c
+    ${CMAKE_SOURCE_DIR}/app/tactical/main_tactical.cpp
+    ${CMAKE_SOURCE_DIR}/app/tactical/freertos_hooks.c
+    ${CMAKE_SOURCE_DIR}/app/tactical/stm32h5xx_it_tactical.c
 )
 
 add_executable(imc_tactical)
@@ -186,7 +186,9 @@ target_sources(imc_tactical PRIVATE
 )
 target_include_directories(imc_tactical PRIVATE
     ${MX_Include_Dirs}
-    ${CMAKE_SOURCE_DIR}/app/tactical/include
+    ${CMAKE_SOURCE_DIR}/app/tactical          # application headers, beside their sources
+    ${CMAKE_SOURCE_DIR}/app/tactical/include  # FreeRTOSConfig.h only — a build artifact,
+                                              # not an application header
 )
 target_compile_definitions(imc_tactical PRIVATE ${MX_Defines_Syms})
 target_link_libraries(imc_tactical PRIVATE imc_drivers STM32_Drivers freertos_kernel m)
