@@ -15,6 +15,10 @@
  * by the ADC1 DMA circular scan.  No HAL polling is performed at read time.
  * See AdcDma.hpp for scan configuration requirements.
  *
+ * @warning The divider ratio below is derived from the schematic and has not
+ *          been confirmed against a bench measurement (open item P10). Every
+ *          voltage this class reports is only as good as that number.
+ *
  * @author Integrated Motor Controller firmware team
  ******************************************************************************/
 
@@ -26,7 +30,7 @@
 /**
  * @brief Reads battery voltage via the VBAT_SENSE ADC divider.
  */
-class Battery
+class Battery final
 {
 public:
   /**
@@ -37,6 +41,8 @@ public:
    *
    * Pass a different value to the constructor to tune for real-world resistor
    * tolerances without recompiling.
+   *
+   * @todo Confirm on the bench against a known supply voltage (open item P10).
    */
   static constexpr float kDefaultDividerRatio = 4.333f; ///< (100 kΩ + 30 kΩ) / 30 kΩ
 
@@ -47,13 +53,25 @@ public:
    * @brief Construct a Battery monitor.
    *
    * @param vbatSlot      Slot index into g_adcBuf[] for the VBAT_SENSE channel.
-   *                      Defaults to kSlotVbat (PC4, ADC1 INP4).
+   *                      Defaults to kSlotVbat (PC4, ADC1 INP4). An index at or
+   *                      beyond ADC_DMA_NUM_CHANNELS is replaced with kSlotVbat
+   *                      rather than reading past the end of the buffer.
    * @param dividerRatio  Voltage divider ratio V_battery / V_adc.
    *                      Defaults to kDefaultDividerRatio.  Adjust to compensate
    *                      for real-world resistor tolerances without recompiling.
    */
-  explicit Battery(uint8_t vbatSlot    = kSlotVbat,
+  explicit Battery(uint8_t vbatSlot     = kSlotVbat,
                    float   dividerRatio = kDefaultDividerRatio);
+
+  /**
+   * @brief Report whether the reading can be trusted yet.
+   *
+   * g_adcBuf[] is all zeroes until adcDmaStart() succeeds, and zero is an
+   * entirely plausible-looking 0 mV. Check this before acting on a reading.
+   *
+   * @return true once the ADC1 DMA scan is running.
+   */
+  bool isValid() const;
 
   /**
    * @brief Read the battery voltage.
@@ -61,7 +79,7 @@ public:
    * Reads g_adcBuf[m_vbatSlot] (populated by the ADC1 DMA circular scan),
    * applies the voltage-divider ratio, and returns the result in millivolts.
    *
-   * @return Battery voltage in millivolts.
+   * @return Battery voltage in millivolts. Reads 0 while isValid() is false.
    */
   uint32_t readMillivolts();
 
@@ -69,11 +87,15 @@ public:
    * @brief Check whether the battery is below the low-voltage threshold.
    *
    * @return true if voltage < kLowBatteryThresholdMv.
+   *
+   * @note Always returns false while isValid() is false. Without that guard the
+   *       zero-initialised DMA buffer reads as 0 mV and any failsafe wired to
+   *       this method latches a brownout on every power-up.
    */
   bool isLow();
 
 private:
-  uint8_t m_vbatSlot;     ///< Slot index into g_adcBuf[] for VBAT_SENSE.
+  uint8_t m_vbatSlot;     ///< Slot index into g_adcBuf[]; clamped by the constructor.
   float   m_dividerRatio; ///< Voltage divider ratio (V_battery / V_adc).
 
   static constexpr float kVdda    = 3300.0f; ///< ADC reference (mV)

@@ -17,11 +17,16 @@
  *       IPROPI (INP18, INP8): 47.5 cycles  (low-impedance DRV8874 current-sense output)
  *       VBAT   (INP4):        92.5 cycles  (higher-impedance resistor divider)
  *
- * Caller (main) must issue after MX_ADC1_Init():
+ * Start the scan once, after MX_ADC1_Init(), with adcDmaStart(), which wraps:
  * @code
- *   HAL_ADCEx_Calibration_Start(&hadc1, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED);
+ *   HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED);
  *   HAL_ADC_Start_DMA(&hadc1, (uint32_t*)g_adcBuf, ADC_DMA_NUM_CHANNELS);
  * @endcode
+ * (Note the two-argument calibration call — the three-argument form taking
+ * ADC_CALIB_OFFSET belongs to the STM32H7 HAL, not H5.) Until it has
+ * been called, g_adcBuf[] is all zeroes — which is a *valid-looking* reading of
+ * 0 mV and 0 mA. Drivers must therefore gate on adcDmaIsRunning() rather than
+ * trusting the buffer, or a battery monitor reports a flat pack on every boot.
  *
  * Atomicity note: on Cortex-M33, naturally aligned 16-bit reads are single-bus-cycle
  * atomic operations.  A driver reading its slot once into a local variable is safe
@@ -31,6 +36,11 @@
  ******************************************************************************/
 
 #pragma once
+
+extern "C"
+{
+#include "stm32h5xx_hal.h"
+}
 
 #include <cstdint>
 
@@ -53,5 +63,26 @@ static constexpr uint8_t kSlotVbat        = 2U;
  * that uses Motor or Battery.
  */
 extern volatile uint16_t g_adcBuf[ADC_DMA_NUM_CHANNELS];
+
+/**
+ * @brief Calibrate ADC1 and start the circular DMA scan.
+ *
+ * Call once, after MX_ADC1_Init(), before any Motor or Battery read is
+ * trusted. Wrapping calibration and start together means a caller cannot start
+ * the scan while leaving the running flag unset.
+ *
+ * @param hadc Handle for ADC1.
+ * @return true if calibration and the DMA start both succeeded.
+ */
+bool adcDmaStart(ADC_HandleTypeDef* hadc);
+
+/**
+ * @brief Report whether the DMA scan has been started successfully.
+ *
+ * @return true once adcDmaStart() has succeeded. Until then every slot in
+ *         g_adcBuf[] reads zero, which is indistinguishable from a genuine
+ *         zero measurement — treat readings as invalid while this is false.
+ */
+bool adcDmaIsRunning();
 
 /* EOF -----------------------------------------------------------------------*/

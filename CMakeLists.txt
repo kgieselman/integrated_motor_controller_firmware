@@ -150,7 +150,6 @@ set(IMC_Drivers_Src
     ${CMAKE_SOURCE_DIR}/drivers/src/Buzzer.cpp
     ${CMAKE_SOURCE_DIR}/drivers/src/Console.cpp
     ${CMAKE_SOURCE_DIR}/drivers/src/CRSFReceiver.cpp
-    ${CMAKE_SOURCE_DIR}/drivers/src/Drivetrain.cpp
     ${CMAKE_SOURCE_DIR}/drivers/src/EEPROM.cpp
     ${CMAKE_SOURCE_DIR}/drivers/src/Encoder.cpp
     ${CMAKE_SOURCE_DIR}/drivers/src/IMU.cpp

@@ -35,6 +35,7 @@ extern "C"
 #include "task.h"
 }
 
+#include "AdcDma.hpp"
 #include "Buzzer.hpp"
 #include "Console.hpp"
 #include "Led.hpp"
@@ -137,6 +138,13 @@ int main(void)
   s_ledLink.init();
   s_ledFault.init();
   s_buzzer.init();
+
+  // Start the ADC1 circular scan. Until this succeeds, Battery and Motor
+  // report their readings as unavailable rather than as a plausible zero.
+  if (!adcDmaStart(&hadc1))
+  {
+    s_ledFault.on();
+  }
 
   // Arm the first console RX interrupt — re-armed in HAL_UART_RxCpltCallback.
   HAL_UART_Receive_IT(&huart1, &s_rxByte, 1U);
