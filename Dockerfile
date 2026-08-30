@@ -8,7 +8,7 @@
 #   - clang-format + clang-tidy
 #   - cppcheck (static analysis)
 #   - Python 3  (flash scripts, code-gen helpers, etc.)
-#   - git, make, and common dev utilities
+#   - git, vim, less, make, and common dev utilities
 # =============================================================================
 FROM ubuntu:24.04
 
@@ -43,6 +43,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-venv \
     # Utilities
     git \
+    vim \
+    less \
     curl \
     wget \
     ca-certificates \
@@ -56,6 +58,14 @@ RUN arm-none-eabi-gcc --version \
     && cmake --version \
     && ninja --version \
     && clangd --version
+
+# ---------------------------------------------------------------------------
+# Interactive defaults
+# ---------------------------------------------------------------------------
+# git consults EDITOR for commit messages, interactive rebase and so on. Without
+# this it falls back to whatever 'vi' resolves to, which on a minimal image is
+# often nothing at all.
+ENV EDITOR=vim
 
 # ---------------------------------------------------------------------------
 # Working directory — the repo root is mounted here at runtime
