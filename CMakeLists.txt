@@ -178,6 +178,11 @@ set(APP_Tactical_Src
     ${CMAKE_SOURCE_DIR}/app/tactical/subsystems/SubsystemManager.cpp
     ${CMAKE_SOURCE_DIR}/app/tactical/platform/InputSource.cpp
     ${CMAKE_SOURCE_DIR}/app/tactical/platform/SafetyMonitor.cpp
+    ${CMAKE_SOURCE_DIR}/app/tactical/tasks/Tasks.cpp
+    ${CMAKE_SOURCE_DIR}/app/tactical/tasks/CommsTask.cpp
+    ${CMAKE_SOURCE_DIR}/app/tactical/tasks/ControlTask.cpp
+    ${CMAKE_SOURCE_DIR}/app/tactical/tasks/TelemetryTask.cpp
+    ${CMAKE_SOURCE_DIR}/app/tactical/tasks/HeartbeatTask.cpp
     ${CMAKE_SOURCE_DIR}/app/tactical/freertos_hooks.c
     ${CMAKE_SOURCE_DIR}/app/tactical/stm32h5xx_it_tactical.c
 )

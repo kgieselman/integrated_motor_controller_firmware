@@ -10,10 +10,16 @@
  * Clock: HSE 25 MHz (bypass) → PLL1 (M=2, N=40, P=2) → 250 MHz SYSCLK.
  *        HSI48 + CRS → 48 MHz USB clock.
  *
- * Current scope is the phase 0 skeleton: every peripheral the drivers need is
- * brought up, the scheduler starts, a heartbeat proves it is running, and the
- * console proves the board can talk. The control, comms, telemetry and safety
- * tasks land on top of this.
+ * This file's job is deliberately small: bring up the clock and every
+ * peripheral the drivers need, apply the NVIC priority policy, construct the
+ * board-level indicator hardware, hand the interrupt callbacks to the tasks
+ * that own the peripherals behind them, and start the scheduler. The robot
+ * itself lives in app/tactical/tasks/ - see Tasks.hpp for the four tasks and
+ * docs/tactical_architecture.md §3.1 for the schedule they implement.
+ *
+ * Nothing here knows what a CRSF frame or a control cycle is. Each task owns
+ * its own peripherals and its own snapshots inside its translation unit, which
+ * is why the callbacks below only forward.
  *
  * @author Integrated Motor Controller firmware team
  ******************************************************************************/
@@ -37,10 +43,12 @@ extern "C"
 
 #include "AdcDma.hpp"
 #include "Buzzer.hpp"
-#include "Console.hpp"
 #include "Led.hpp"
-#include "platform/RobotContext.hpp"
-#include "platform/Snapshot.hpp"
+#include "tasks/CommsTask.hpp"
+#include "tasks/ControlTask.hpp"
+#include "tasks/HeartbeatTask.hpp"
+#include "tasks/Tasks.hpp"
+#include "tasks/TelemetryTask.hpp"
 
 #include <cstdint>
 
@@ -52,80 +60,25 @@ static void configureInterruptPriorities(void);
 
 /* File-local constants ------------------------------------------------------*/
 
-/// Heartbeat toggle period. 500 ms on + 500 ms off = a 1 Hz blink.
-static constexpr uint32_t kHeartbeatPeriodMs = 500U;
-
-/// Console poll period. Fast enough to feel responsive at a terminal.
-static constexpr uint32_t kConsolePollMs = 10U;
-
-/// Task priorities. configMAX_PRIORITIES is 7; the FreeRTOS timer daemon holds
-/// 6. Application tasks live at 1–5. See docs/tactical_architecture.md §3.1.
-static constexpr UBaseType_t kHeartbeatPriority = 1U;
-static constexpr UBaseType_t kConsolePriority   = 2U;
-
-/// NVIC priority for peripheral ISRs. Anything calling a FreeRTOS *FromISR API
-/// must sit at 5–14; the kernel cannot mask 0–4.
+/// NVIC priority for the UART interrupts this firmware owns, and for the UART4
+/// receive DMA channel. Anything calling a FreeRTOS *FromISR API must sit at
+/// 5-14; the kernel cannot mask 0-4. Six is the row
+/// docs/tactical_architecture.md §3.3 assigns to the CRSF path.
 static constexpr uint32_t kUartIrqPriority = 6U;
 
-/* Driver instances ----------------------------------------------------------*/
+/* Board hardware ------------------------------------------------------------*/
 
 // Statically allocated, constructed before main(). No heap anywhere.
-static Led    s_ledHeartbeat(DEBUG_LED_0_GPIO_Port, DEBUG_LED_0_Pin);
+//
+// These four are board-level rather than task-level: they are the debug
+// indicators and the transducer, they belong to no mechanism, and main() needs
+// two of them before any task exists (the ADC failure path below). They are
+// constructed and initialised here and then bound to the heartbeat task, which
+// is the only thing that drives them once the scheduler is running.
+static Led    s_ledMode(DEBUG_LED_0_GPIO_Port, DEBUG_LED_0_Pin);
 static Led    s_ledLink(DEBUG_LED_1_GPIO_Port, DEBUG_LED_1_Pin);
 static Led    s_ledFault(DEBUG_LED_2_GPIO_Port, DEBUG_LED_2_Pin);
 static Buzzer s_buzzer(DEBUG_BUZZER_GPIO_Port, DEBUG_BUZZER_Pin);
-
-// Console transport is USART1 on the growth header. This is a workaround for a
-// connector part shortage on Rev A — the intended transport is USB-CDC, and
-// swapping it back is a change to this one line plus the RX wiring below.
-static Console s_console(&huart1);
-
-/// Single-byte RX staging buffer for interrupt-driven console receive.
-static uint8_t s_rxByte;
-
-/* Tasks ---------------------------------------------------------------------*/
-
-/**
- * @brief Blink DEBUG_LED_0 to prove the scheduler is running.
- *
- * Becomes the mode indicator once the control task exists: the blink pattern
- * will encode Disabled / Teleop / Auto / Fault.
- *
- * @param pvParameters Unused.
- */
-static void vHeartbeatTask(void* pvParameters)
-{
-  (void)pvParameters;
-
-  for (;;)
-  {
-    s_ledHeartbeat.toggle();
-    vTaskDelay(pdMS_TO_TICKS(kHeartbeatPeriodMs));
-  }
-}
-
-/**
- * @brief Drain complete console lines and dispatch them.
- *
- * @param pvParameters Unused.
- *
- * @todo Console::feed() runs in ISR context while poll() runs here, and the
- *       line buffer is unprotected between them (issue F3). Guard the shared
- *       state before the console is trusted for anything but diagnostics.
- */
-static void vConsoleTask(void* pvParameters)
-{
-  (void)pvParameters;
-
-  s_console.printAbout();
-  s_console.printHelp();
-
-  for (;;)
-  {
-    s_console.poll();
-    vTaskDelay(pdMS_TO_TICKS(kConsolePollMs));
-  }
-}
 
 /* Entry point ---------------------------------------------------------------*/
 
@@ -136,7 +89,7 @@ int main(void)
   initPeripherals();
   configureInterruptPriorities();
 
-  s_ledHeartbeat.init();
+  s_ledMode.init();
   s_ledLink.init();
   s_ledFault.init();
   s_buzzer.init();
@@ -148,18 +101,46 @@ int main(void)
     s_ledFault.on();
   }
 
-  // Arm the first console RX interrupt — re-armed in HAL_UART_RxCpltCallback.
-  HAL_UART_Receive_IT(&huart1, &s_rxByte, 1U);
+  // Task init, in dependency order and all of it before any task is created.
+  //
+  // Two of these arm an interrupt (the CRSF DMA and the console receiver), so
+  // an ISR can fire from here on. Both hooks are written to tolerate arriving
+  // before their task exists; see commsTaskOnUartRxEvent().
+  //
+  // controlTaskInit() is last because it runs the boot self-test, which is the
+  // §5.1 edge SelfTest -> Fault. A failure there is not a reason to stop: it
+  // latches inside SafetyMonitor, and the robot boots into Fault with the
+  // reason readable on the console - which is a great deal more useful than a
+  // board that sits dark in an unexplained while(1).
+  if (!commsTaskInit())
+  {
+    s_ledFault.on();
+  }
+
+  if (!telemetryTaskInit())
+  {
+    s_ledFault.on();
+  }
+
+  heartbeatTaskInit(s_ledMode, s_ledLink, s_ledFault, s_buzzer);
+
+  if (!controlTaskInit())
+  {
+    s_ledFault.on();
+  }
 
   // One chirp says the board booted far enough to reach the scheduler. Called
   // before the scheduler starts, so the blocking busy-wait costs nothing.
   s_buzzer.chirp();
 
-  xTaskCreate(vHeartbeatTask, "Heartbeat", configMINIMAL_STACK_SIZE * 2U,
-              nullptr, kHeartbeatPriority, nullptr);
-
-  xTaskCreate(vConsoleTask, "Console", configMINIMAL_STACK_SIZE * 4U,
-              nullptr, kConsolePriority, nullptr);
+  if (!tasksCreateAll())
+  {
+    // Almost always configTOTAL_HEAP_SIZE against the stack depths in
+    // Tasks.hpp. Starting the scheduler with a missing task would run a robot
+    // with, say, no failsafe, so stop here instead.
+    s_ledFault.on();
+    Error_Handler();
+  }
 
   vTaskStartScheduler();
 
@@ -173,21 +154,38 @@ int main(void)
 /* Interrupt callbacks -------------------------------------------------------*/
 
 /**
- * @brief Feed a received console byte and re-arm the receiver.
+ * @brief Forward a completed console byte to the telemetry task.
  *
  * @param huart UART that raised the interrupt.
  *
- * @note Runs in ISR context. Calls no FreeRTOS API, so its NVIC priority is
- *       unconstrained by the kernel — it is nonetheless set to
- *       kUartIrqPriority so that the policy holds uniformly.
+ * @note Runs in ISR context. The HAL dispatches one callback for every UART, so
+ *       this forwards unconditionally and the task decides whether the handle
+ *       is its own.
  */
 extern "C" void HAL_UART_RxCpltCallback(UART_HandleTypeDef* huart)
 {
-  if (huart->Instance == USART1)
-  {
-    s_console.feed(&s_rxByte, 1U);
-    HAL_UART_Receive_IT(&huart1, &s_rxByte, 1U);
-  }
+  telemetryTaskOnRxComplete(huart);
+}
+
+/**
+ * @brief Forward a UART receive event to the comms task.
+ *
+ * Raised by the UART4 IDLE line and by the receive DMA channel's half- and
+ * full-transfer events. In circular mode @p size is the DMA write POSITION
+ * measured from the start of the ring, not a count of new bytes - see the
+ * receive-model note at the top of drivers/CRSFReceiver.hpp.
+ *
+ * @param huart UART that raised the event.
+ * @param size  Current DMA write position, in bytes from the start of the ring.
+ *
+ * @note Runs in ISR context, and the comms task's hook calls
+ *       vTaskNotifyGiveFromISR(), so both source interrupts must sit in the
+ *       kernel-maskable 5-14 band. configureInterruptPriorities() puts them at
+ *       kUartIrqPriority.
+ */
+extern "C" void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef* huart, uint16_t size)
+{
+  commsTaskOnUartRxEvent(huart, size);
 }
 
 /* Private helpers -----------------------------------------------------------*/
@@ -224,12 +222,27 @@ static void initPeripherals(void)
  * a FreeRTOS *FromISR API must sit at 5–14, so the ones this firmware owns are
  * re-asserted here, after init and before the scheduler starts.
  *
- * @todo Extend to the CRSF UART4 DMA, the motor fault EXTI lines and the IMU
- *       INT line as those drivers are wired in.
+ * The CRSF receive path raises HAL_UARTEx_RxEventCallback from two different
+ * interrupts, and both are set, because setting only one leaves half the path
+ * outside the policy:
+ *
+ *  - UART4_IRQn carries the IDLE-line event, which is what marks the end of a
+ *    CRSF frame. CubeMX left it at 8 — legal, but not the row §3.3 assigns.
+ *  - GPDMA1_Channel1_IRQn is the UART4 receive DMA channel, and it carries the
+ *    half- and full-transfer events. CubeMX configures the channel but never
+ *    enables its NVIC line, so it is enabled here as well as prioritised.
+ *
+ * @todo Extend to the motor fault EXTI lines (priority 5) and the IMU INT line
+ *       (priority 7) as those drivers are wired in.
  */
 static void configureInterruptPriorities(void)
 {
   HAL_NVIC_SetPriority(USART1_IRQn, kUartIrqPriority, 0U);
+
+  HAL_NVIC_SetPriority(UART4_IRQn, kUartIrqPriority, 0U);
+
+  HAL_NVIC_SetPriority(GPDMA1_Channel1_IRQn, kUartIrqPriority, 0U);
+  HAL_NVIC_EnableIRQ(GPDMA1_Channel1_IRQn);
 }
 
 /**
