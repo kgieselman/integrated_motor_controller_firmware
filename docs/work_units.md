@@ -1,98 +1,104 @@
 # Tactical Firmware — Work Units
 
-**How this codebase is broken up for AI-assisted development.**
-
 Companion to [`tactical_architecture.md`](tactical_architecture.md), which is the design. This file is
-the *plan of attack*: each unit below is sized to be picked up in one fresh session, by one agent, with a
-named set of files to read and a verification step that agent can run without hardware or a human.
+the plan of attack: each unit is sized for one fresh session, with a named set of files to read and a
+verification step the agent can run itself.
+
+**To start a unit, the whole prompt is:**
+
+```
+Execute work unit U0.3 from docs/work_units.md.
+```
+
+Everything the agent needs is below. Pick the model from the dispatch table in §1 before you start.
 
 ---
 
-## 1. Why not sprints and stories
+## 0. Agent protocol — read this first
 
-The useful part of agile here is the vertical slice — every phase ends in something demonstrable rather
-than in a completed layer. The phases in `tactical_architecture.md` §10 already have that shape.
+You have been asked to execute a single work unit. Follow this exactly.
 
-The rest of the ceremony does not transfer. Story points and velocity measure nothing about an agent.
-Sprints are a time box, and an agent has no cadence. "As a user, I want…" produces fiction when applied
-to `Snapshot<T>`, which serves no user story and never will.
+**1. Load context, in this order.**
+   - This section (§0) and your unit's entry in §3 or §4.
+   - The sections of `docs/tactical_architecture.md` your unit names.
+   - `docs/style_guide.md`.
+   - The files in your unit's **Read** list — **and no others.** Do not explore the codebase. If you
+     believe you need a file that is not listed, stop and say which file and why.
 
-What actually constrains a session is **context budget** — how much must be read to do the work
-correctly. So the unit of work here is not a story. It is *a change with a closed context boundary and a
-machine-checkable done condition*.
+**2. Do the work.** Implement exactly what the unit's **Task** describes. Nothing more. Do not add
+   features, helpers, or "while I'm here" improvements — a later unit may own that ground.
 
-### 1.1 Contract, then leaves, then integration
+**3. Stay inside the blast radius.** You may create or modify only the files in your unit's
+   **Creates / modifies** list, plus these three standing permissions:
+   - `CMakeLists.txt` — to register any new `.cpp` you created. Every new source must go in the
+     matching target's source list in the same change; a file in no target is the bug this project
+     was restructured to prevent.
+   - `app/tactical/main_tactical.cpp` — **one `#include` line only**, if your unit produces headers
+     with no `.cpp` and needs them included somewhere to prove they compile.
+   - `docs/work_units.md` — your own unit's status cell in §1, set to `Done`, as your last step.
 
-Within each phase the ordering is always the same, and it is not negotiable:
+   If you find a bug outside the blast radius, **report it, do not fix it.** Another unit may own that
+   file, and a helpful cross-unit edit is the most expensive mistake available here.
 
-1. **Contract units** — define the headers and types that other units consume. Done alone, first, and
-   committed before anything else starts. Header-only where possible.
-2. **Leaf units** — consume only committed interfaces, and nothing from each other. These are the ones
-   that can run in parallel if you ever want to.
-3. **Integration units** — wiring, task creation, configuration. Inherently sequential. Do not try to
-   parallelise these; the cost of merging two agents' integration work exceeds the saving.
+**4. Verify.** Run the unit's **Done when** command. If it fails, fix your own work and run it again.
+   If it needs hardware you cannot reach, say so plainly in your report — never imply it passed.
 
-The reason this works is the architecture's one-way dependency rule (§2.1). Interfaces that only ever
-point downward are interfaces that can be frozen, and a frozen interface is what makes a unit closed.
+**5. Do not commit.** Leave the working tree dirty. The human reviews `git status` against the blast
+   radius, then commits.
 
-### 1.2 What makes a unit the right size
+**6. Report, briefly:**
+   - What you created or changed, one line each.
+   - The verification command and its actual result.
+   - Anything you found outside the blast radius that needs attention.
+   - Any decision the unit left ambiguous and how you resolved it.
 
-Every unit below states four things. If a unit is missing any of them, it is the wrong shape and should
-be split:
+**Conventions that apply to every unit:** C++20, `-fno-exceptions -fno-rtti`, no heap allocation after
+boot, no `std::function`, no heap-backed containers, fixed-size arrays only. Doxygen on every header,
+class, public method and member — `docs/style_guide.md` is the authority and it is not optional.
 
-| | |
-|---|---|
-| **Read** | The exact files to load. If this list exceeds five files, the unit is too big. |
-| **Creates / modifies** | The blast radius, declared up front. |
-| **Freezes / consumes** | Which interfaces it defines, and which it depends on already existing. |
-| **Done when** | A command the agent can run, or an observable it can check. Not "looks right". |
+---
+
+## 1. Dispatch table
+
+Pick the model from this column. The rationale is in §2.
+
+| Unit | Model | Status | Depends on | Goal |
+|---|---|---|---|---|
+| **U0.1** | Stronger | ✅ Done | — | Core types: `RobotContext`, `SensorFrame`, `DriverInput`, `ControlMode` |
+| **U0.2** | Stronger | 🔄 In progress | U0.1 | `Snapshot<T>` — the cross-task value holder |
+| **U0.3** | Stronger | Ready | U0.1 | `Subsystem` contract + `SubsystemManager` |
+| **U0.4** | Cheaper | Blocked on U0.2 | U0.1, U0.2 | `InputSource` — CRSF → `DriverInput` |
+| **U0.5** | Stronger | Blocked on U0.4 | U0.1, U0.2, U0.4 | `SafetyMonitor` — the failsafe table |
+| **U0.6** | Stronger | Blocked on U0.5 | U0.1–U0.5 | Task set and integration |
+| **U0.7** | Cheaper | Blocked on U0.6 | U0.6 | Indicators and watchdog |
+| **U1.1** | Stronger | Ready *(parallel with phase 0)* | — | Host test harness |
+| **U1.2a** | Cheaper | Blocked on U1.1 | U1.1 | `ExpoCurve` |
+| **U1.2b** | Cheaper | Blocked on U1.1 | U1.1 | `SlewRateLimiter` |
+| **U1.2c** | Cheaper | Blocked on U1.1 | U1.1 | `Debouncer` |
+| **U1.2d** | Cheaper | Blocked on U1.1 | U1.1 | `ArcadeMixer` |
+| **U1.3** | Cheaper | Blocked | U0.3, U1.2 | `DriveBase` |
+| **U1.4** | Cheaper | Blocked | U1.3 | Teleop behavior + `Robot2026` config |
+| **U1.5** | Stronger | Blocked | U1.4 | Integration and bench verification |
+
+Phase 2–6 units are written when the phase starts, so they can take account of what the previous phase
+actually taught us.
 
 ---
 
 ## 2. Choosing a model
 
-Do not spend a frontier model on mechanical work, and do not save money on work whose mistakes are
-silent.
+**Stronger model** when *any* of these holds:
 
-**Use the stronger model when *any* of these is true:**
+- The unit **defines an interface** other units consume — a mistake propagates into every consumer.
+- It reasons about **concurrency or interrupt context**. These failures are intermittent, and a passing
+  test proves nothing.
+- Its **failure mode is silent or physical** — a failsafe that doesn't fire, a pin driven the wrong way.
+- The spec needs **judgment**: choosing thresholds, resolving a contradiction, picking an abstraction.
 
-- The unit **defines an interface** other units consume. A mistake here propagates into every consumer
-  and is expensive to unwind after they exist.
-- It reasons about **concurrency or interrupt context** — ISR/task boundaries, critical sections,
-  atomicity. These failures are intermittent, and a test that passes proves nothing.
-- Its **failure mode is silent or physical** — a failsafe that doesn't fire, a pin driven the wrong way,
-  a motor that keeps running.
-- The **spec requires judgment**: choosing thresholds, resolving a contradiction between documents,
-  deciding what the right abstraction is.
+**Cheaper model** when *all* of these hold: the interface it works against is frozen and committed, the
+spec is unambiguous, and a build or host test catches errors in seconds.
 
-**Use the cheaper model when *all* of these are true:**
-
-- The interface it works against is **already frozen and committed**.
-- The spec is **unambiguous** — the behaviour is fully described, nothing is left to taste.
-- A **build or host test catches errors immediately**, so a wrong answer surfaces in seconds.
-
-Pure functions in `control/` are the archetype of the second category: fully specified, no hardware, no
-concurrency, host-testable. Contracts and safety logic are the archetype of the first.
-
-### 2.1 Briefing template
-
-```
-Read docs/tactical_architecture.md, then these files and no others:
-  <the unit's Read list>
-
-Task: <the unit's one-sentence goal>
-
-You may create or modify only:
-  <the unit's blast radius>
-
-Follow docs/style_guide.md. Do not change any interface outside your blast
-radius — if one looks wrong, stop and say so rather than editing it.
-
-Done when: <the unit's verification>
-```
-
-The instruction not to edit outside the blast radius matters more than it looks. Most cross-unit damage
-comes from an agent "helpfully" fixing something in a header another unit owns.
+The `control/` primitives are the archetype of the second case. Contracts and safety logic are the first.
 
 ---
 
@@ -101,111 +107,132 @@ comes from an agent "helpfully" fixing something in a header another unit owns.
 Nothing moves at the end of this phase. The milestone is that the radio link is visible and the failsafe
 demonstrably fires.
 
-### U0.1 — Core types
+### U0.1 — Core types ✅ Done
 
 | | |
 |---|---|
-| **Model** | **Stronger.** Pure contract work: every later unit consumes these types, so a poor shape here is paid for six times over. |
-| **Depends on** | — |
-| **Blocks** | U0.2, U0.3, U0.4, U0.5, U0.6 |
-| **Read** | `docs/tactical_architecture.md` §4, `drivers/Motor.hpp`, `drivers/Encoder.hpp`, `drivers/Battery.hpp` |
+| **Model** | Stronger — pure contract work; every later unit consumes these types. |
+| **Read** | `docs/tactical_architecture.md` §4; `drivers/Motor.hpp`, `drivers/Encoder.hpp`, `drivers/Battery.hpp` |
 | **Creates** | `app/tactical/platform/RobotContext.hpp` |
 | **Freezes** | `ControlMode`, `SensorFrame`, `DriverInput`, `RobotContext` |
-| **Done when** | `scripts/build.sh --target imc_tactical` still succeeds (header compiles when included from `main_tactical.cpp`). |
+| **Done when** | `scripts/build.sh --target imc_tactical` succeeds. |
 
-Header-only, no `.cpp`. `SensorFrame` holds one cycle's readings as plain values — no HAL types, per
-invariant 3. `DriverInput` carries the decoded axes, a switch bitmask and `ageMs`.
-
-### U0.2 — `Snapshot<T>`
+### U0.2 — `Snapshot<T>` 🔄 In progress
 
 | | |
 |---|---|
-| **Model** | **Stronger.** Sixty lines, but it is the concurrency primitive the whole design rests on, and a torn read fails once a week rather than once a run. |
-| **Depends on** | U0.1 |
-| **Blocks** | U0.4, U0.5, U0.6 |
-| **Read** | `docs/tactical_architecture.md` §3.2, `app/tactical/platform/RobotContext.hpp` |
+| **Model** | Stronger — small, but it is the concurrency primitive the whole design rests on, and a torn read fails once a week rather than once a run. |
+| **Read** | `docs/tactical_architecture.md` §3.2; `app/tactical/platform/RobotContext.hpp`; `drivers/CRSFReceiver.cpp` (for the PRIMASK pattern in `hasNewData()`) |
 | **Creates** | `app/tactical/platform/Snapshot.hpp` |
 | **Freezes** | `Snapshot<T>::read()`, `Snapshot<T>::write()` |
-| **Done when** | Builds, and a `static_assert(std::is_trivially_copyable_v<T>)` rejects a non-POD instantiation. |
+| **Done when** | Builds, and a `static_assert` rejects a non-trivially-copyable instantiation. |
 
-Save and restore PRIMASK rather than calling `__enable_irq()` — see `CRSFReceiver::hasNewData()` for the
-pattern and the reason.
+**Task.** Header-only template holding one value of type `T`, copied whole in and out under a critical
+section so a reader never observes a partial update. Single writer, multiple readers.
+
+Save and restore PRIMASK — `uint32_t p = __get_PRIMASK(); __disable_irq(); … __set_PRIMASK(p);`. Do **not**
+call `__enable_irq()` on exit: that unconditionally enables interrupts and silently breaks any outer
+critical section the caller may be inside. `CRSFReceiver::hasNewData()` is the reference.
+
+Guard with `static_assert(std::is_trivially_copyable_v<T>)`. Intended for small POD structs of tens of
+bytes; say so in the Doxygen along with the reason the copy cost is acceptable.
 
 ### U0.3 — Subsystem contract and manager
 
 | | |
 |---|---|
-| **Model** | **Stronger.** This is *the* interface of the whole design — every mechanism, this year and every year after, implements it. |
-| **Depends on** | U0.1 |
-| **Blocks** | every subsystem, in every later phase |
-| **Read** | `docs/tactical_architecture.md` §6, `app/tactical/platform/RobotContext.hpp` |
+| **Model** | Stronger — *the* interface of the whole design; every mechanism, this year and every year after, implements it. |
+| **Read** | `docs/tactical_architecture.md` §6; `app/tactical/platform/RobotContext.hpp` |
 | **Creates** | `app/tactical/subsystems/Subsystem.hpp`, `app/tactical/subsystems/SubsystemManager.hpp/.cpp` |
 | **Freezes** | The five-method `Subsystem` contract |
-| **Done when** | Builds with a throwaway test subsystem registered in a zero-length array. |
+| **Done when** | Builds. Add a throwaway subsystem in the manager's own test path if you need one to prove it compiles, then remove it. |
 
-The manager holds `Subsystem* const*` and a count — no ownership, no allocation. `disableAll()` must call
-`onDisable()` on every subsystem unconditionally, not only on ones it believes are enabled.
+**Task.** `Subsystem` is an abstract base with exactly five methods — `name()`, `onInit()`,
+`onPeriodic(const RobotContext&)`, `onDisable()`, `publishTelemetry()`. Signatures are given verbatim in
+§6 of the architecture doc; use them as written. Virtual dispatch is correct here and is a deliberate
+choice — see invariant 6.
+
+`SubsystemManager` holds `Subsystem* const*` plus a count. No ownership, no allocation, no container.
+`periodic(ctx)` walks the array in order; `disableAll()` calls `onDisable()` on **every** subsystem
+unconditionally — never track which ones you think are enabled and skip the rest.
+
+`TelemetrySink` does not exist yet (phase 2). Forward-declare it; do not invent it.
 
 ### U0.4 — `InputSource`
 
 | | |
 |---|---|
-| **Model** | **Cheaper.** Mechanical mapping against two frozen interfaces, fully specified, verifiable on a host. |
-| **Depends on** | U0.1, U0.2 |
-| **Blocks** | U0.5, U0.6 |
-| **Read** | `drivers/CRSFReceiver.hpp`, `app/tactical/platform/RobotContext.hpp`, `app/tactical/platform/Snapshot.hpp` |
+| **Model** | Cheaper — mechanical mapping against two frozen interfaces, fully specified. |
+| **Read** | `drivers/CRSFReceiver.hpp`; `app/tactical/platform/RobotContext.hpp`; `app/tactical/platform/Snapshot.hpp` |
 | **Creates** | `app/tactical/platform/InputSource.hpp/.cpp` |
-| **Consumes** | `CRSFReceiver`, `Snapshot<DriverInput>` |
-| **Done when** | Builds; the CRSF→normalised mapping is exercised by a table of known channel values. |
+| **Done when** | `scripts/build.sh --target imc_tactical` succeeds. |
 
-Deadband, expo curve and switch decode happen here, so the control task sees intent rather than channel
-counts. **CRSF channel 5 is the enable switch** (agreed default). Stamp `ageMs` from `lastFrameAgeMs()`.
+**Task.** Turn raw CRSF channels into a `DriverInput` and publish it into a `Snapshot<DriverInput>`.
+
+- Deadband around centre, then an expo curve on the stick axes, so the control task sees intent rather
+  than channel counts.
+- **CRSF channel 5 is the enable switch** (agreed default).
+- Stamp `ageMs` from `CRSFReceiver::lastFrameAgeMs()` at publish time.
+- Deadband width and expo factor are `static constexpr` for now; phase 2 moves them into `ParamStore`.
+
+Take the `CRSFReceiver` by reference in the constructor. Do not call HAL directly.
 
 ### U0.5 — `SafetyMonitor`
 
 | | |
 |---|---|
-| **Model** | **Stronger.** Safety logic with judgment calls, and its failure mode is a robot that does not stop. |
-| **Depends on** | U0.1, U0.2, U0.4 |
-| **Blocks** | U0.6 |
-| **Read** | `docs/tactical_architecture.md` §5, `app/tactical/platform/RobotContext.hpp`, `drivers/Battery.hpp`, `drivers/Motor.hpp` |
+| **Model** | Stronger — safety logic with judgment calls, and the failure mode is a robot that does not stop. |
+| **Read** | `docs/tactical_architecture.md` §5; `app/tactical/platform/RobotContext.hpp`; `drivers/Battery.hpp`, `drivers/Motor.hpp` |
 | **Creates** | `app/tactical/platform/SafetyMonitor.hpp/.cpp` |
 | **Freezes** | `SafetyVerdict { ControlMode mode; Reason reason; }` |
-| **Done when** | Builds; each trigger in §5.2 is reachable in a host-side table test with synthetic inputs. |
+| **Done when** | Builds, and every trigger in §5.2 is reachable from synthetic inputs. |
 
-Implement the full §5.2 table. Two tiers: **Disabled** recovers by itself, **Fault** latches. Return the
-*reason* alongside the mode — telemetry saying `"Disabled: link age 312 ms"` is worth the extra field.
-`Battery::isLow()` already guards its own boot case; do not duplicate that check here.
+**Task.** Implement the full §5.2 trigger table — link age > 250 ms, driver disable switch, latched motor
+fault, debounced battery sag, control overrun, and the mode state machine of §5.1.
+
+Two tiers, and the distinction is the point: **Disabled** is unlatched and recovers by itself when the
+cause clears; **Fault** latches until explicitly cleared. Return the *reason* alongside the mode so
+telemetry can report `"Disabled: link age 312 ms"` rather than going quiet.
+
+`Battery::isLow()` already suppresses its own boot case via `adcDmaIsRunning()` — do not duplicate that
+check. `Motor::isFaulted()` already ORs the EXTI latch with the pin level.
 
 ### U0.6 — Task set and integration
 
 | | |
 |---|---|
-| **Model** | **Stronger.** Interrupt priorities, task interaction, watchdog gating — many constraints meeting at once, and this is where they collide. |
-| **Depends on** | U0.1 – U0.5 |
-| **Blocks** | phase 1 |
-| **Read** | `docs/tactical_architecture.md` §3–§4, `app/tactical/main_tactical.cpp`, `drivers/CRSFReceiver.hpp` |
-| **Modifies** | `app/tactical/main_tactical.cpp`, `CMakeLists.txt`; creates `app/tactical/tasks/*` |
-| **Done when** | Builds; on hardware the mode reaches Disabled within 250 ms of pulling the receiver, and the cycle holds 200 Hz with zero overruns for ten minutes. |
+| **Model** | Stronger — interrupt priorities, task interaction and watchdog gating all meet here. |
+| **Read** | `docs/tactical_architecture.md` §3 and §4; `app/tactical/main_tactical.cpp`; `drivers/CRSFReceiver.hpp` |
+| **Creates / modifies** | `app/tactical/tasks/*`; `app/tactical/main_tactical.cpp` |
+| **Done when** | Builds. On hardware: mode reaches Disabled within 250 ms of pulling the receiver, and the cycle holds 200 Hz with zero overruns for ten minutes. |
 
-Create Comms (5), Control (4), Telemetry stub (2), Heartbeat (1). Wire `HAL_UARTEx_RxEventCallback` to
-`CRSFReceiver::onDmaRxEvent`, and set the UART4 DMA IRQ to priority 6 — it calls a FreeRTOS API, so
-`configureInterruptPriorities()` must cover it. Measure cycle time with the DWT counter that
-`Buzzer::init()` already enables.
+**Task.** Create Comms (priority 5), Control (4), Telemetry stub (2) and Heartbeat (1), per §3.1. The
+control cycle runs the seven steps of §4 in order, at 200 Hz via `vTaskDelayUntil`.
+
+Wire `HAL_UARTEx_RxEventCallback` to `CRSFReceiver::onDmaRxEvent`, and add the UART4 DMA IRQ to
+`configureInterruptPriorities()` at priority 6 — it calls a FreeRTOS API, so it must sit in the 5–14 band.
+
+Measure cycle time with the DWT cycle counter, which `Buzzer::init()` already enables. Publish it; fault
+on ten consecutive overruns.
+
+The hardware half of the verification cannot be run from a session — report the build result and state
+plainly that the on-hardware criteria are outstanding.
 
 ### U0.7 — Indicators and watchdog
 
 | | |
 |---|---|
-| **Model** | **Cheaper.** Small, fully specified, no shared interfaces. |
-| **Depends on** | U0.6 |
-| **Blocks** | — |
-| **Read** | `docs/tactical_architecture.md` §5.4, `drivers/Led.hpp`, `drivers/Buzzer.hpp` |
+| **Model** | Cheaper — small, fully specified, no shared interfaces. |
+| **Read** | `docs/tactical_architecture.md` §5.4; `drivers/Led.hpp`, `drivers/Buzzer.hpp` |
 | **Creates** | `app/tactical/tasks/HeartbeatTask.cpp` |
-| **Done when** | Builds; LED_1 tracks the link and LED_0's blink pattern changes with mode, observed on hardware. |
+| **Done when** | Builds. On hardware, LED_1 tracks the link and LED_0's blink pattern changes with mode. |
 
-Refresh IWDG **only** if the control task's liveness counter advanced. Call `Buzzer::beep()` from here and
-nowhere else — it busy-waits, and priority 1 is the only place that is acceptable.
+**Task.** LED_0 blink pattern encodes the mode; LED_1 shows link health; LED_2 shows a latched fault;
+buzzer chirps on mode change.
+
+Refresh the IWDG **only** if the control task's liveness counter advanced since the last tick — that is
+the entire point of putting the watchdog here rather than in the control task. `Buzzer::beep()` blocks
+and busy-waits; priority 1 is the only place that is acceptable, so call it from here and nowhere else.
 
 ---
 
@@ -215,84 +242,129 @@ nowhere else — it busy-waits, and priority 1 is the only place that is accepta
 
 | | |
 |---|---|
-| **Model** | **Stronger.** Build-system work against a cross-compiling project; the failure modes are obscure. |
-| **Depends on** | — (can run in parallel with phase 0) |
-| **Blocks** | U1.2a–d |
-| **Read** | `CMakeLists.txt`, `cmake/gcc-arm-none-eabi.cmake` |
-| **Creates** | `tests/CMakeLists.txt`, `tests/main.cpp`; modifies root `CMakeLists.txt` |
-| **Done when** | `cmake -B build-host -DIMC_HOST_TESTS=ON && ctest` runs and passes with one trivial test. |
+| **Model** | Stronger — build-system work against a cross-compiling project; obscure failure modes. |
+| **Read** | `CMakeLists.txt`; `cmake/gcc-arm-none-eabi.cmake` |
+| **Creates** | `tests/CMakeLists.txt`, `tests/example_test.cpp`; modifies root `CMakeLists.txt` |
+| **Done when** | `cmake -S . -B build-host -DIMC_HOST_TESTS=ON && cmake --build build-host && ctest --test-dir build-host` passes. |
 
-Builds `control/` for the host with the native compiler — no toolchain file, no HAL. Keep the test
-framework minimal; a hand-rolled assert macro is enough and adds no dependency.
+**Task.** Build `app/tactical/control/` for the host with the native compiler — no toolchain file, no
+HAL. Gate the whole thing behind `option(IMC_HOST_TESTS)` so the firmware build is untouched when it
+is off.
 
-### U1.2a–d — Control primitives *(four parallel units)*
+**Glob the test sources deliberately:**
+
+```cmake
+file(GLOB IMC_TEST_SRC ${CMAKE_CURRENT_SOURCE_DIR}/*_test.cpp)
+```
+
+A glob is the wrong default in this repo and right here: U1.2a–d run in parallel and would otherwise all
+edit this one file. Comment the reason in place so nobody "fixes" it later.
+
+Keep the framework minimal — a hand-rolled assert macro that counts failures and returns non-zero is
+enough. Do not add a dependency.
+
+### U1.2a–d — Control primitives *(four independent units)*
 
 | | |
 |---|---|
-| **Model** | **Cheaper**, all four. Pure functions, unambiguous specs, instant host-test feedback. The archetype. |
-| **Depends on** | U1.1 |
-| **Blocks** | U1.3 |
-| **Read** | `docs/style_guide.md`, `tests/CMakeLists.txt` |
-| **Creates** | one pair each: **a)** `ExpoCurve.hpp` · **b)** `SlewRateLimiter.hpp` · **c)** `Debouncer.hpp` · **d)** `ArcadeMixer.hpp` under `app/tactical/control/` |
-| **Done when** | `ctest` passes, including edge cases: zero `dt`, saturated input, sign changes across zero. |
+| **Model** | Cheaper, all four. Pure functions, unambiguous specs, instant host-test feedback. |
+| **Read** | `docs/style_guide.md`; `tests/CMakeLists.txt` |
+| **Creates** | one header plus one test each, under `app/tactical/control/` and `tests/` |
+| **Done when** | `ctest --test-dir build-host` passes, including the edge cases named below. |
 
-No HAL types, no `#include "stm32h5xx_hal.h"`, no global state. `ArcadeMixer` must preserve the
-throttle/steering ratio when scaling a clipped result rather than clamping each side independently.
+Header-only, no HAL include, no global state, no dependency on each other.
+
+- **U1.2a `ExpoCurve.hpp`** — maps `[-1, 1]` to `[-1, 1]` with an adjustable expo factor; `0.0f` is
+  linear. Must be exactly symmetric about zero and preserve the endpoints. Edge cases: 0, ±1, factor 0.
+- **U1.2b `SlewRateLimiter.hpp`** — limits change per second given a `dt`. Edge cases: `dt` of zero
+  (must not divide by it), a step larger than the limit, and a sign change across zero.
+- **U1.2c `Debouncer.hpp`** — a boolean must hold its new state for N milliseconds before the output
+  follows. Edge cases: chatter shorter than the window, and the very first sample.
+- **U1.2d `ArcadeMixer.hpp`** — throttle and steering to left/right. When the result clips, **scale both
+  sides to preserve the ratio** rather than clamping each independently; clamping turns a hard forward
+  turn into an unintended straight line. Edge cases: full throttle plus full steering, and both zero.
 
 ### U1.3 — `DriveBase`
 
 | | |
 |---|---|
-| **Model** | **Cheaper.** Consumes three frozen interfaces; the open-loop path is straightforward. |
-| **Depends on** | U0.3, U1.2 |
-| **Blocks** | U1.4 |
-| **Read** | `app/tactical/subsystems/Subsystem.hpp`, `drivers/Motor.hpp`, `drivers/Encoder.hpp`, `app/tactical/control/ArcadeMixer.hpp` |
+| **Model** | Cheaper — consumes three frozen interfaces; the open-loop path is straightforward. |
+| **Read** | `app/tactical/subsystems/Subsystem.hpp`; `drivers/Motor.hpp`, `drivers/Encoder.hpp`; `app/tactical/control/ArcadeMixer.hpp` |
 | **Creates** | `app/tactical/subsystems/DriveBase.hpp/.cpp` |
-| **Done when** | Builds; `onDisable()` verifiably calls `Motor::disable()` on both channels. |
+| **Done when** | Builds; `onDisable()` calls `Motor::disable()` on both channels. |
 
-Owns two `Motor` and two `Encoder` instances directly — *not* `Drivetrain`, which was removed. Carry the
-`Open` / `Velocity` mode enum now even though only `Open` is implemented, so phase 3 is a fill-in rather
-than a signature change. Call `Encoder::setDirection()` with the commanded sign each cycle.
+**Task.** A `Subsystem` owning two `Motor` and two `Encoder` instances **directly** — not `Drivetrain`,
+which was removed and must not come back.
 
-### U1.4 — Teleop and robot config
+Intent methods (`arcade(throttle, steering)`, `tank(left, right)`) set targets and return.
+`onPeriodic()` applies slew limiting and writes the motors. Carry a `ControlMode { Open, Velocity }` enum
+now even though only `Open` is implemented, so phase 3 fills in a branch rather than changing signatures.
+
+Call `Encoder::setDirection()` with the sign of the commanded duty each cycle, before `Encoder::update()`
+— a single-channel encoder cannot determine direction on its own.
+
+### U1.4 — Teleop behavior and robot config
 
 | | |
 |---|---|
-| **Model** | **Cheaper.** Construction and mapping against frozen interfaces. |
-| **Depends on** | U1.3 |
-| **Blocks** | U1.5 |
-| **Read** | `docs/tactical_architecture.md` §6.1 and §7.1, `app/tactical/subsystems/DriveBase.hpp` |
+| **Model** | Cheaper — construction and mapping against frozen interfaces. |
+| **Read** | `docs/tactical_architecture.md` §6.1 and §7.1; `app/tactical/subsystems/DriveBase.hpp` |
 | **Creates** | `app/tactical/behavior/Behavior.hpp`, `behavior/TeleopBehavior.hpp/.cpp`, `config/RobotConfig.hpp`, `config/Robot2026.hpp/.cpp` |
 | **Done when** | Builds with `-DIMC_ROBOT=2026`. |
 
-Use designated initializers for anything with more than two fields — this layer is the reason C++20 was
-adopted. `Robot2026` constructs and lists; if you write an `if` in it, the logic belongs elsewhere.
+**Task.** `Behavior` is an interface with `update(const RobotContext&)` and `isFinished()`.
+`TeleopBehavior` maps sticks to `DriveBase` intent methods and touches no actuator directly.
+
+`Robot2026` constructs the drivers and subsystems as members, lists them in a `Subsystem*` array, and
+does nothing else. **If you write an `if` in that file, the logic belongs in a subsystem or a behavior.**
+Use designated initializers for anything with more than two fields — this layer is why C++20 was adopted.
 
 ### U1.5 — Integration and bench verification
 
 | | |
 |---|---|
-| **Model** | **Stronger.** First time the whole stack drives real motors; judgment needed on what "drivable" means. |
-| **Depends on** | U1.4 |
-| **Blocks** | phase 2 |
-| **Read** | `app/tactical/main_tactical.cpp`, `app/tactical/tasks/ControlTask.cpp` |
-| **Modifies** | `app/tactical/main_tactical.cpp`, `app/tactical/tasks/ControlTask.cpp` |
+| **Model** | Stronger — first time the whole stack drives real motors. |
+| **Read** | `app/tactical/main_tactical.cpp`; `app/tactical/tasks/ControlTask.cpp` |
+| **Modifies** | `app/tactical/main_tactical.cpp`; `app/tactical/tasks/ControlTask.cpp` |
 | **Done when** | Sticks drive the robot, **and it coasts to a stop within 250 ms of the transmitter being switched off — tested deliberately, at speed, more than once.** |
 
 ---
 
-## 5. Session hygiene
+## 5. The human's loop
 
-- **One unit per session.** Start fresh. Context does not need to carry over, because every interface a
-  unit depends on is already committed to a file.
-- **Read the architecture doc, not the codebase.** That is what it is for — one read instead of fifteen
-  files of reverse-engineering. If the doc is wrong, fix the doc as part of the unit.
-- **Commit per unit.** A unit that cannot be committed on its own was scoped wrong.
-- **The blast radius is a hard boundary.** An agent that finds a problem outside it should report it, not
-  fix it. Cross-unit edits are where parallel work goes wrong.
-- **When a unit's verification cannot be run** — anything needing hardware — say so explicitly in the
-  handover rather than implying it passed.
+Before reading any code, three checks:
+
+```bash
+git status --short          # only the declared blast radius? if not, that is the finding
+scripts/build.sh --target imc_tactical
+git add -A && git commit -m "U0.3: subsystem contract and manager"
+```
+
+The `git status` check is mechanical and catches the most expensive failure — an agent that edited a
+header another unit owns. Unit-prefixed commit messages make `git log --oneline` a progress report.
+
+If verification fails, **stay in that session**. The context is loaded; restarting pays the read cost
+twice. If the agent starts asking clarifying questions about scope, the unit was too big — split it.
 
 ---
 
-*Update this file when a phase completes, and add the next phase's units before starting it.*
+## 6. Why this shape rather than sprints
+
+The useful part of agile here is the vertical slice: every phase ends in something demonstrable rather
+than in a completed layer. The phases in `tactical_architecture.md` §10 already have that shape.
+
+The rest does not transfer. Story points measure nothing about an agent, sprints are a time box and an
+agent has no cadence, and "as a user, I want…" produces fiction when applied to `Snapshot<T>`.
+
+What actually constrains a session is **context budget**. So the unit here is not a story — it is a
+change with a closed context boundary and a machine-checkable done condition. Within each phase the
+order is always **contract → leaves → integration**, and it is not negotiable: interfaces get frozen
+before anything consumes them, leaves depend only on committed interfaces, and integration is
+sequential because merging two agents' wiring costs more than doing it once.
+
+That ordering works because of the architecture's one-way dependency rule. Interfaces that only ever
+point downward are interfaces that can be frozen, and a frozen interface is what makes a unit closed.
+
+---
+
+*Mark units Done in §1 as they land. Add the next phase's units before starting that phase.*

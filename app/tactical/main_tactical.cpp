@@ -40,6 +40,7 @@ extern "C"
 #include "Console.hpp"
 #include "Led.hpp"
 #include "platform/RobotContext.hpp"
+#include "platform/Snapshot.hpp"
 
 #include <cstdint>
 
