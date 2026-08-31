@@ -177,6 +177,7 @@ set(APP_Tactical_Src
     ${CMAKE_SOURCE_DIR}/app/tactical/main_tactical.cpp
     ${CMAKE_SOURCE_DIR}/app/tactical/subsystems/SubsystemManager.cpp
     ${CMAKE_SOURCE_DIR}/app/tactical/platform/InputSource.cpp
+    ${CMAKE_SOURCE_DIR}/app/tactical/platform/SafetyMonitor.cpp
     ${CMAKE_SOURCE_DIR}/app/tactical/freertos_hooks.c
     ${CMAKE_SOURCE_DIR}/app/tactical/stm32h5xx_it_tactical.c
 )
