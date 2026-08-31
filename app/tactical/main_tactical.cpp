@@ -39,6 +39,7 @@ extern "C"
 #include "Buzzer.hpp"
 #include "Console.hpp"
 #include "Led.hpp"
+#include "platform/RobotContext.hpp"
 
 #include <cstdint>
 
