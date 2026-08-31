@@ -70,7 +70,7 @@ Pick the model from this column. The rationale is in §2.
 | **U0.4** | Cheaper | ✅ Done | U0.1, U0.2 | `InputSource` — CRSF → `DriverInput` |
 | **U0.5** | Stronger | ✅ Done | U0.1, U0.2, U0.4 | `SafetyMonitor` — the failsafe table |
 | **U0.6** | Stronger | ✅ Done | U0.1–U0.5 | Task set and integration |
-| **U0.7** | Cheaper | Blocked on U0.6 | U0.6 | Indicators and watchdog |
+| **U0.7** | Cheaper | ✅ Done | U0.6 | Indicators and watchdog |
 | **U1.1** | Stronger | Ready *(parallel with phase 0)* | — | Host test harness |
 | **U1.2a** | Cheaper | Blocked on U1.1 | U1.1 | `ExpoCurve` |
 | **U1.2b** | Cheaper | Blocked on U1.1 | U1.1 | `SlewRateLimiter` |
