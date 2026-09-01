@@ -84,7 +84,55 @@ static uint32_t s_overrunTotal = 0U;
 /// Incremented once per completed cycle. The heartbeat task's liveness gate.
 static uint32_t s_liveness = 0U;
 
+/**
+ * @brief true once cycleCounterStart() saw DWT->CYCCNT actually advance.
+ *
+ * Feeds the boot self-test. If this is false every measurement below reads
+ * zero, s_cycleTimeUs never exceeds SafetyMonitor::kCycleOverrunUs, and the
+ * §5.2 control-overrun trigger can never fire - so the robot must not be
+ * allowed to run. controlTaskInit() latches Fault on it.
+ */
+static bool s_cycleCounterOk = false;
+
 /* Private helpers -----------------------------------------------------------*/
+
+/**
+ * @brief Start the DWT cycle counter and prove it is running.
+ *
+ * @return true if DWT->CYCCNT advanced after being enabled.
+ *
+ * @note THIS TASK OWNS ITS OWN ENABLE, DELIBERATELY. Buzzer::init() also
+ *       enables the counter and documents that as idempotent, but it is a
+ *       driver for a transducer: it may be removed, reordered, or fail, and its
+ *       bool return is not this task's to rely on. The §5.2 control-overrun
+ *       failsafe is measured here, so the thing it is measured with is started
+ *       here. Enabling an already-enabled counter costs one redundant register
+ *       write at boot.
+ *
+ * @note The verification is the point. On a part with no trace unit, or with
+ *       DWT locked by a debug probe, the CTRL write is silently ignored and
+ *       CYCCNT stays at zero - which reads as a cycle time of zero µs forever,
+ *       i.e. a failsafe that looks healthy and can never fire. The short
+ *       NOP spin below is long enough that a running counter cannot still read
+ *       the same value, and short enough to cost nothing at boot. __NOP() is an
+ *       asm volatile, so the loop survives the optimiser without needing a
+ *       volatile counter - which would draw -Wvolatile on C++20.
+ */
+static bool cycleCounterStart()
+{
+  CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+  DWT->CYCCNT       = 0U;
+  DWT->CTRL        |= DWT_CTRL_CYCCNTENA_Msk;
+
+  const uint32_t before = DWT->CYCCNT;
+
+  for (uint32_t spin = 0U; spin < 16U; ++spin)
+  {
+    __NOP();
+  }
+
+  return (DWT->CYCCNT != before);
+}
 
 /**
  * @brief Convert a DWT cycle count to microseconds.
@@ -263,7 +311,9 @@ static void controlTaskEntry(void* pvParameters)
 
 bool controlTaskInit()
 {
-  const bool selfTestPassed = s_manager.initAll();
+  s_cycleCounterOk = cycleCounterStart();
+
+  const bool selfTestPassed = s_manager.initAll() && s_cycleCounterOk;
   s_safety.reportSelfTest(selfTestPassed);
 
   return selfTestPassed;

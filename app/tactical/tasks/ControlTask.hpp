@@ -24,20 +24,28 @@
 #include "tasks/RobotState.hpp"
 
 /**
- * @brief Run the boot self-test and report it to the SafetyMonitor.
+ * @brief Start the cycle counter, run the boot self-test, report both.
  *
- * Calls SubsystemManager::initAll() and hands the result to
- * SafetyMonitor::reportSelfTest(), which is the §5.1 edge
+ * Starts and verifies this task's DWT cycle counter, calls
+ * SubsystemManager::initAll(), and hands the AND of the two to
+ * SafetyMonitor::reportSelfTest() - the §5.1 edge
  * `SelfTest --(any onInit() false)--> Fault`. Call once, before
  * tasksCreateAll() and therefore before the scheduler starts, which is the only
  * window in which a subsystem's onInit() may block.
  *
- * @return true if every subsystem initialised.
+ * @return true if the cycle counter runs and every subsystem initialised.
  *
- * @note Returns true in phase 0, where the manager holds zero subsystems - an
- *       empty walk trivially succeeds. Wiring it now rather than in the unit
- *       that adds the first subsystem is what stops that unit having to edit
- *       this task.
+ * @note A cycle counter that will not start is a self-test FAILURE, not a
+ *       degraded mode. It is what RobotState::cycleTimeUs is measured with, and
+ *       therefore what the §5.2 control-overrun trigger is measured with; with
+ *       it stopped the cycle time reads zero forever and the overrun failsafe
+ *       silently cannot fire. Latching Fault with a readable reason is strictly
+ *       better than running a robot whose failsafe is decorative.
+ *
+ * @note The subsystem half returns true in phase 0, where the manager holds
+ *       zero subsystems - an empty walk trivially succeeds. Wiring it now
+ *       rather than in the unit that adds the first subsystem is what stops
+ *       that unit having to edit this task.
  */
 bool controlTaskInit();
 

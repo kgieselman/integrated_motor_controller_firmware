@@ -111,11 +111,17 @@ objects; `using enum` in switch-heavy state machines.
 | Timer daemon | 6 | kernel | 256 w | FreeRTOS built-in. Buzzer chirps, LED patterns. |
 | `Comms` | 5 | task notification from UART4 DMA/IDLE ISR | 512 w | Parse CRSF frames, decode 16 channels, apply deadband and expo, publish a `DriverInput` snapshot with a timestamp. |
 | `Control` | 4 | `vTaskDelayUntil`, 5 ms | 1024 w | The control cycle (§4). Owns every actuator on the board. |
-| `Telemetry` | 2 | `vTaskDelay`, 50 ms | 768 w | Drain the event ring and state snapshot to USB-CDC; host the parameter console. |
+| `Telemetry` | 2 | `vTaskDelay`, 50 ms | 768 w | Drain the event ring and state snapshot to the USART1 console; host the parameter console. |
 | `Heartbeat` | 1 | `vTaskDelay`, 100 ms | 256 w | Mode-coded LED blink, buzzer, and IWDG refresh gated on the control task's liveness counter. |
 | Idle | 0 | kernel | 128 w | `__WFI()`, statically allocated. |
 
 The entire robot runs inside one 200 Hz task. Everything else exists to feed it or to watch it.
+
+**Console transport is USART1 (PB14/PB15, 115200 baud), not USB-CDC.** Rev A could not be built with
+the USB connector because of a part shortage, so the console moved to USART1 and stayed there;
+`TelemetryTask.cpp` carries the same note beside the handle. USB_DRD_FS is still initialised and its
+NVIC row below is still reserved, so moving back is one handle plus the receive wiring — but every
+mention of "the console" in this document means USART1 until that happens.
 
 ### 3.2 Cross-task data
 
@@ -437,7 +443,7 @@ Two CMake knobs:
 `ParamStore` is a static table of named tunables. Each entry carries a name, a type, a pointer to the
 live value, min/max clamps, a default, and an offset into the EEPROM block.
 
-- Console commands over USB-CDC: `param list`, `param get <name>`, `param set <name> <value>`,
+- Console commands over the USART1 console: `param list`, `param get <name>`, `param set <name> <value>`,
   `param save`, `param load`, `param default`.
 - Persisted to the M24C64 as a versioned, CRC'd block. A version mismatch or bad CRC loads defaults and
   says so on the console rather than applying garbage gains.
@@ -631,7 +637,7 @@ before it.
 |---|---|---|
 | **0 — Spine** | Peripheral init in `main_tactical.cpp`, the four tasks, `Snapshot<T>`, `SafetyMonitor`, `InputSource`, and a `SubsystemManager` with zero subsystems. Nothing moves. | LED_1 tracks the radio link, the mode reaches Disabled within 250 ms of unplugging the receiver, and the cycle holds 200 Hz with zero overruns for ten minutes. |
 | **1 — Raw drive (MVP)** | `DriveBase` in open-loop mode owning the two `Motor` and two `Encoder` instances directly (§10.2), `TeleopBehavior` mapping two sticks to arcade drive, `Robot2026` wiring them up. Deadband, expo, slew limit. | Sticks drive the robot, and it coasts to a stop within 250 ms of the transmitter being switched off — tested deliberately, at speed, more than once. |
-| **2 — Telemetry and tuning** | `TelemetryTask` over USB-CDC, `ParamStore` with console commands and EEPROM persistence. | You change the drive slew limit from the console, feel the difference, save it, power-cycle, and it is still there. |
+| **2 — Telemetry and tuning** | `TelemetryTask` over the USART1 console, `ParamStore` with console commands and EEPROM persistence. | You change the drive slew limit from the console, feel the difference, save it, power-cycle, and it is still there. |
 | **3 — Closed-loop drive** | Rewrite `Encoder` for input-capture mode. `VelocityEstimator`, `PidController`, `DriveBase` velocity mode selected by a stored parameter. | Commanded RPM holds within 5% while the robot is pushed against a wall, both sides match on a straight line, and the phase-1 teleop code is unchanged. |
 | **4 — Heading** | `HeadingEstimator` (complementary filter over gyro and accel), heading hold on straight drive, a `TurnToAngle` primitive. | The robot tracks a straight line across the track with the turn stick centred, and turns 90° to within a few degrees. |
 | **5 — Mechanisms** | `Intake` and `Launcher` on the servo/ESC outputs, each with its own state machine and jam timeout. | Adding each is a new class plus one line in the robot config. If it is not, the contract needs fixing before phase 6. |
@@ -663,8 +669,8 @@ target, every driver compiled for the first time, the layout co-located and the 
 
 | Phase | Issue |
 |---|---|
-| 0 | **ISR priorities.** The policy is applied to USART1 and the pattern is set in `configureInterruptPriorities()`. Extend it to the CRSF UART4 DMA, the motor fault EXTI lines and the IMU INT line as each is wired. |
-| 0 | **Nothing has run on hardware.** The FreeRTOS baseline, `Led`, `Buzzer` and the relocated `Console` compile but have never executed. Flash and confirm the heartbeat, the boot chirp and the console banner before building on top of them. |
+| 0 | **ISR priorities — the lines not yet wired.** Closed for the console and the CRSF path: `configureInterruptPriorities()` now sets USART1, UART4 and GPDMA1_Channel1 to priority 6 and enables USART1 and GPDMA1_Channel1 (`cubemx/Core/Src/gpdma.c` also enables the DMA line, at priority 8, so that one is a re-assertion rather than a missing enable). What is left is the motor fault EXTI3 / EXTI7 lines at 5 and the IMU INT1 EXTI2 line at 7, each added by the phase that wires its driver. Confirming the band actually holds is part of U0.9's bench sweep. |
+| 0 | **Nothing has run on hardware.** The FreeRTOS baseline, `Led`, `Buzzer` and the relocated `Console` compile but have never executed. This is U0.9: flash and confirm the heartbeat, the boot chirp, the console banner and — now that USART1_IRQHandler() exists — a command typed back at it, before building on top of them. |
 | 0 | **Heap sizing.** `configTOTAL_HEAP_SIZE` is still an unvalidated 64 KB. Right-size it from `uxTaskGetStackHighWaterMark()` once the task set is real. |
 | 2 | **P10** — the VBAT divider ratio (4.333) is unconfirmed. Measure it before the brownout threshold means anything. |
 | 2 | **F3** — `Console`'s line buffer is shared between the RX ISR and the console task with no protection. Acceptable while it is diagnostics-only; must be fixed before `ParamStore` trusts it. |

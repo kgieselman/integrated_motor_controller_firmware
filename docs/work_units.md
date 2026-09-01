@@ -71,7 +71,7 @@ Pick the model from this column. The rationale is in §2.
 | **U0.5** | Stronger | ✅ Done | U0.1, U0.2, U0.4 | `SafetyMonitor` — the failsafe table |
 | **U0.6** | Stronger | ✅ Done | U0.1–U0.5 | Task set and integration |
 | **U0.7** | Cheaper | ✅ Done | U0.6 | Indicators and watchdog |
-| **U0.8** | Stronger | Ready | U0.1–U0.7 | Pre-flash corrections — console RX, DWT ownership, doc drift |
+| **U0.8** | Stronger | ✅ Done | U0.1–U0.7 | Pre-flash corrections — console RX, DWT ownership, doc drift |
 | **U0.9** | Stronger | Blocked on U0.8 | U0.8 | First light, IWDG bring-up, and the phase-0 bench sweep |
 | **U1.1** | Stronger | Ready *(parallel with phase 0)* | — | Host test harness |
 | **U1.2a** | Cheaper | Blocked on U1.1 | U1.1 | `ExpoCurve` |
@@ -139,7 +139,7 @@ critical section the caller may be inside. `CRSFReceiver::hasNewData()` is the r
 Guard with `static_assert(std::is_trivially_copyable_v<T>)`. Intended for small POD structs of tens of
 bytes; say so in the Doxygen along with the reason the copy cost is acceptable.
 
-### U0.3 — Subsystem contract and manager
+### U0.3 — Subsystem contract and manager ✅ Done
 
 | | |
 |---|---|
@@ -160,7 +160,7 @@ unconditionally — never track which ones you think are enabled and skip the re
 
 `TelemetrySink` does not exist yet (phase 2). Forward-declare it; do not invent it.
 
-### U0.4 — `InputSource`
+### U0.4 — `InputSource` ✅ Done
 
 | | |
 |---|---|
@@ -179,7 +179,7 @@ unconditionally — never track which ones you think are enabled and skip the re
 
 Take the `CRSFReceiver` by reference in the constructor. Do not call HAL directly.
 
-### U0.5 — `SafetyMonitor`
+### U0.5 — `SafetyMonitor` ✅ Done
 
 | | |
 |---|---|
@@ -199,7 +199,7 @@ telemetry can report `"Disabled: link age 312 ms"` rather than going quiet.
 `Battery::isLow()` already suppresses its own boot case via `adcDmaIsRunning()` — do not duplicate that
 check. `Motor::isFaulted()` already ORs the EXTI latch with the pin level.
 
-### U0.6 — Task set and integration
+### U0.6 — Task set and integration ✅ Done
 
 | | |
 |---|---|
@@ -220,7 +220,7 @@ on ten consecutive overruns.
 The hardware half of the verification cannot be run from a session — report the build result and state
 plainly that the on-hardware criteria are outstanding.
 
-### U0.7 — Indicators and watchdog
+### U0.7 — Indicators and watchdog ✅ Done
 
 | | |
 |---|---|
@@ -236,7 +236,7 @@ Refresh the IWDG **only** if the control task's liveness counter advanced since 
 the entire point of putting the watchdog here rather than in the control task. `Buzzer::beep()` blocks
 and busy-waits; priority 1 is the only place that is acceptable, so call it from here and nowhere else.
 
-### U0.8 — Pre-flash corrections
+### U0.8 — Pre-flash corrections ✅ Done
 
 | | |
 |---|---|

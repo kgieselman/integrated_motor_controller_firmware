@@ -92,7 +92,15 @@ int main(void)
   s_ledMode.init();
   s_ledLink.init();
   s_ledFault.init();
-  s_buzzer.init();
+
+  // Buzzer::init() returns false when the DWT cycle counter will not run, in
+  // which case beep() is disabled and the robot loses its audible mode cues.
+  // Not fatal, and not silent either. The control task's overrun measurement
+  // has its own counter and its own self-test - see controlTaskInit().
+  if (!s_buzzer.init())
+  {
+    s_ledFault.on();
+  }
 
   // Start the ADC1 circular scan. Until this succeeds, Battery and Motor
   // report their readings as unavailable rather than as a plausible zero.
@@ -229,8 +237,15 @@ static void initPeripherals(void)
  *  - UART4_IRQn carries the IDLE-line event, which is what marks the end of a
  *    CRSF frame. CubeMX left it at 8 — legal, but not the row §3.3 assigns.
  *  - GPDMA1_Channel1_IRQn is the UART4 receive DMA channel, and it carries the
- *    half- and full-transfer events. CubeMX configures the channel but never
- *    enables its NVIC line, so it is enabled here as well as prioritised.
+ *    half- and full-transfer events. cubemx/Core/Src/gpdma.c both prioritises
+ *    it (at 8) and enables it, so this is a re-assertion to the §3.3 row
+ *    rather than a missing enable. The EnableIRQ() below is redundant today and
+ *    kept so that the policy for this line reads complete in one place.
+ *
+ * USART1_IRQn is the console receiver. CubeMX does not configure it at all -
+ * USART1 is absent from the .ioc's NVIC list - so this is the only place it is
+ * prioritised or enabled, and USART1_IRQHandler() in stm32h5xx_it_tactical.c is
+ * the only thing standing between HAL_UART_Receive_IT() and Default_Handler.
  *
  * @todo Extend to the motor fault EXTI lines (priority 5) and the IMU INT line
  *       (priority 7) as those drivers are wired in.
@@ -238,6 +253,7 @@ static void initPeripherals(void)
 static void configureInterruptPriorities(void)
 {
   HAL_NVIC_SetPriority(USART1_IRQn, kUartIrqPriority, 0U);
+  HAL_NVIC_EnableIRQ(USART1_IRQn);
 
   HAL_NVIC_SetPriority(UART4_IRQn, kUartIrqPriority, 0U);
 

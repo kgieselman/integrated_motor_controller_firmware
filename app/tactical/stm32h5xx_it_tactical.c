@@ -26,6 +26,7 @@ extern DMA_HandleTypeDef handle_GPDMA1_Channel2;
 extern DMA_NodeTypeDef   Node_GPDMA1_Channel1;
 extern DMA_QListTypeDef  List_GPDMA1_Channel1;
 extern DMA_HandleTypeDef handle_GPDMA1_Channel1;
+extern UART_HandleTypeDef huart1;
 extern UART_HandleTypeDef huart4;
 extern PCD_HandleTypeDef  hpcd_USB_DRD_FS;
 
@@ -108,6 +109,22 @@ void GPDMA1_Channel2_IRQHandler(void)
 /* ---------------------------------------------------------------------------
  * Peripheral handlers
  * -------------------------------------------------------------------------*/
+/*
+ * Console receive, USART1. HAL_UART_Receive_IT() arms one byte at a time from
+ * telemetryTaskInit(); without this vector the RXNE interrupt lands on the weak
+ * Default_Handler in cubemx/startup_stm32h563xx.s, which is an infinite loop.
+ * Console output is blocking transmit, so the banner prints either way and
+ * nothing else reports the missing receive path.
+ *
+ * USART1_IRQn is not listed in cubemx/integrated_motor_controller.ioc, so this
+ * handler and the matching HAL_NVIC_EnableIRQ() in main_tactical.cpp both live
+ * in files this project owns and survive a CubeMX regeneration.
+ */
+void USART1_IRQHandler(void)
+{
+    HAL_UART_IRQHandler(&huart1);
+}
+
 void UART4_IRQHandler(void)
 {
     HAL_UART_IRQHandler(&huart4);

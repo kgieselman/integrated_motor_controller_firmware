@@ -45,8 +45,9 @@ integrated_motor_controller_firmware/
 ├── drivers/            # Hardware abstraction layer (8 driver classes)
 ├── scripts/
 │   ├── build.sh        # Configure + compile (runs inside container)
-│   ├── flash.sh        # Flash via OpenOCD (runs on host)
-│   └── format.sh       # clang-format on app/ and drivers/
+│   ├── connect.sh      # Attach to the board's serial console
+│   ├── cppcheck.sh     # Static analysis over app/ and drivers/
+│   └── flash.sh        # Flash via OpenOCD (runs on host)
 ├── .devcontainer/
 │   └── devcontainer.json   # VS Code Dev Containers configuration
 ├── .clang-format       # Formatting rules derived from style_guide.md
