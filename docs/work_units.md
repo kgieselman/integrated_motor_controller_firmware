@@ -71,6 +71,8 @@ Pick the model from this column. The rationale is in §2.
 | **U0.5** | Stronger | ✅ Done | U0.1, U0.2, U0.4 | `SafetyMonitor` — the failsafe table |
 | **U0.6** | Stronger | ✅ Done | U0.1–U0.5 | Task set and integration |
 | **U0.7** | Cheaper | ✅ Done | U0.6 | Indicators and watchdog |
+| **U0.8** | Stronger | Ready | U0.1–U0.7 | Pre-flash corrections — console RX, DWT ownership, doc drift |
+| **U0.9** | Stronger | Blocked on U0.8 | U0.8 | First light, IWDG bring-up, and the phase-0 bench sweep |
 | **U1.1** | Stronger | Ready *(parallel with phase 0)* | — | Host test harness |
 | **U1.2a** | Cheaper | Blocked on U1.1 | U1.1 | `ExpoCurve` |
 | **U1.2b** | Cheaper | Blocked on U1.1 | U1.1 | `SlewRateLimiter` |
@@ -234,6 +236,128 @@ Refresh the IWDG **only** if the control task's liveness counter advanced since 
 the entire point of putting the watchdog here rather than in the control task. `Buzzer::beep()` blocks
 and busy-waits; priority 1 is the only place that is acceptable, so call it from here and nowhere else.
 
+### U0.8 — Pre-flash corrections
+
+| | |
+|---|---|
+| **Model** | Stronger — one fix is interrupt wiring and one is a safety measurement that fails silently. §2's second and third rules both apply. |
+| **Read** | `docs/tactical_architecture.md` §3.3 and §5.2; `app/tactical/main_tactical.cpp`; `app/tactical/stm32h5xx_it_tactical.c`; `app/tactical/tasks/ControlTask.cpp`; `drivers/Buzzer.hpp`, `drivers/Console.hpp` |
+| **Creates / modifies** | `app/tactical/stm32h5xx_it_tactical.c`, `app/tactical/main_tactical.cpp`, `app/tactical/tasks/ControlTask.cpp`, `app/tactical/tasks/ControlTask.hpp`, `docs/tactical_architecture.md`, `README.md` |
+| **Done when** | `scripts/build.sh --target imc_tactical` succeeds. The hardware half of phase 0 is U0.9, not this unit. |
+
+**Task.** Three unrelated corrections found reviewing U0.1–U0.7. They are one unit because none is big
+enough to be its own, and all three must land before the board is flashed for the first time.
+
+**1 — The console receive path is not connected.** `configureInterruptPriorities()` sets the priority of
+`USART1_IRQn` but never enables it, and no `USART1_IRQHandler` exists anywhere in the tree, so that
+vector is still the weak `Default_Handler` in `cubemx/startup_stm32h563xx.s` — an infinite loop.
+`telemetryTaskInit()` arms `HAL_UART_Receive_IT()` and returns `HAL_OK`, and console *output* works
+because it is blocking transmit, so the banner prints and nothing reports that no byte can ever arrive.
+
+Add `USART1_IRQHandler()` calling `HAL_UART_IRQHandler(&huart1)` to `stm32h5xx_it_tactical.c`, and
+`HAL_NVIC_EnableIRQ(USART1_IRQn)` beside the existing `SetPriority` call. Leave
+`cubemx/integrated_motor_controller.ioc` alone: it does not list `USART1_IRQn`, but both halves of this
+fix live in files this project owns, so a CubeMX regeneration cannot remove them.
+
+**2 — The overrun failsafe depends on the buzzer, silently.** `ControlTask` reads `DWT->CYCCNT` and
+enables it nowhere. The only code that starts that counter is `Buzzer::init()`, whose `bool` return
+`main()` discards. If DWT does not run, `cycleTimeUs` is zero forever, `SafetyMonitor` never sees an
+overrun, and §10's phase-0 criterion — *"the cycle holds 200 Hz with zero overruns for ten minutes"* —
+passes while nothing at all is being measured.
+
+Give `ControlTask` its own cycle counter: a file-local helper that sets `CoreDebug->DEMCR |= TRCENA`,
+zeroes `CYCCNT`, sets `DWT_CTRL_CYCCNTENA_Msk`, and then **verifies the counter actually advances**,
+called from `controlTaskInit()`. Do not remove the enable from `Buzzer::init()` — it is documented as
+idempotent, and `drivers/` is outside this blast radius.
+
+**A counter that will not start is a self-test failure.** `controlTaskInit()` must pass
+`initAll() && cycleCounterOk` to `SafetyMonitor::reportSelfTest()`, so the robot latches Fault with a
+readable reason rather than running with a failsafe that cannot fire. This is the unit's one judgment
+call and it is pre-resolved here so it is not made twice.
+
+Also check `Buzzer::init()`'s return in `main()` and light `LED_2` on failure, matching the other init
+calls around it.
+
+**3 — Documentation drift.**
+
+- §3.1, §7.2 and §10 describe the console as USB-CDC. It is USART1 — `TelemetryTask.cpp` records why
+  (a Rev A connector part shortage) but the architecture never got the change. Correct all three and
+  keep the reason.
+- The comment in `configureInterruptPriorities()` says CubeMX "configures the channel but never enables
+  its NVIC line" for `GPDMA1_Channel1`. `cubemx/Core/Src/gpdma.c` does both, at priority 8. Re-asserting
+  it to 6 is still correct; the comment is not.
+- `README.md` references `scripts/format.sh`, which does not exist on disk.
+- In §3 of this file, U0.3–U0.7 lack the ✅ that U0.1 and U0.2 carry. The §1 dispatch table is right.
+- Refresh §10.1's "Still open" list: its GPDMA1_Channel1 row is stale, and its ISR-priority row is now
+  U0.9's job.
+
+### U0.9 — First light, IWDG bring-up, and the phase-0 bench sweep
+
+| | |
+|---|---|
+| **Model** | Stronger — watchdog bring-up, and every answer this unit produces gates phase 1. |
+| **Read** | `docs/tactical_architecture.md` §3.3, §5.2, §5.4, §10; `app/tactical/main_tactical.cpp`; `app/tactical/tasks/HeartbeatTask.cpp`; `app/tactical/platform/InputSource.hpp`; RM0481 §41 (IWDG) |
+| **Creates / modifies** | `app/tactical/platform/Watchdog.hpp/.cpp`, `app/tactical/tasks/HeartbeatTask.cpp`, `app/tactical/main_tactical.cpp`, `docs/tactical_architecture.md` |
+| **Done when** | Builds — **and part B below is run by a human on the board.** A session cannot finish this unit; report the build result and say plainly that the bench sweep is outstanding. |
+
+**Task, part A — the watchdog (agent).** The liveness gate in
+`HeartbeatTask::refreshWatchdogIfControlAlive()` is correct and complete, but `IWDG->KR = 0xAAAA`
+currently lands on a counter that is not running: the IWDG is absent from the `.ioc`,
+`HAL_IWDG_MODULE_ENABLED` is commented out in `stm32h5xx_hal_conf.h`, and no `MX_IWDG_Init()` exists.
+Until it is started, "control task stall → hardware reset" (§5.2) does not happen — and phase 1 is when
+that stops being theoretical, because a wedged control task then has a live duty cycle on an H-bridge
+and its own radio failsafe wedged alongside it.
+
+Create `platform/Watchdog.hpp/.cpp` exposing `watchdogStart()` and `watchdogRefresh()`, written against
+the IWDG registers directly since the HAL module is off and `stm32h5xx_hal_conf.h` is CubeMX-owned.
+Move `HeartbeatTask`'s `IwdgKey` constants there and have its existing gate call `watchdogRefresh()`;
+the gate logic itself does not change.
+
+- Enable the LSI and wait for it to be ready before writing `IWDG_PR` / `IWDG_RLR`.
+- **Size the reload for at least two heartbeat ticks plus one blocking chirp** — 2 x 100 ms plus
+  `Buzzer::kChirpMs` — with margin; roughly 500 ms. Justify the number you pick in the Doxygen.
+- **Freeze the counter under debug** via `DBGMCU`, or the first breakpoint resets the board.
+- **Call `watchdogStart()` last, immediately before `vTaskStartScheduler()`.** Started any earlier, the
+  whole peripheral-init sequence has to complete inside one reload period, for no benefit.
+
+Note in passing that this also closes the dangerous half of §5.2's stack-overflow row for free: the hook
+in `freertos_hooks.c` spins with interrupts disabled, which does not stop an independent LSI-clocked
+counter, so an overflow now resets in hardware. Recording the task name to EEPROM stays phase 2.
+
+While in `configureInterruptPriorities()`, assert the §3.3 EXTI policy rather than inheriting it from
+`cubemx/Core/Src/gpio.c`. That file already happens to put the motor faults at 5, which is right, but it
+is CubeMX-owned and a regeneration can change it silently. EXTI3 and EXTI7 at 5; EXTI2 (IMU INT1) at 7,
+where `gpio.c` currently leaves it at 5.
+
+**Task, part B — the bench sweep (human).** Nothing in phase 0 has ever executed. Work through this in
+order and record the answers; items 3, 4 and 7 gate phase 1.
+
+1. **First light.** Boot chirp, console banner, and a character typed at the console echoes back — that
+   last one is what U0.8 item 1 fixed, and it is the proof it took.
+2. **Indicators (§5.4).** LED_0 blinks slow in Disabled. LED_1 lights with the receiver powered and goes
+   out within 250 ms of unplugging it. LED_2 is dark.
+3. **Which switch is the kill switch — write the answer down.** `InputSource::kChannelEnable` is `5U`,
+   and `CRSFReceiver::channelUs()` documents its argument as a 0–15 *index*, so the enable switch is the
+   transmitter's CH6 unless the receiver is doing something else. Flip switches until LED_0 changes
+   pattern, then record the convention in `InputSource.hpp` and in §5.2. **This is the one switch that
+   has to work, and no at-speed kill test means anything until it is settled.**
+4. **Watchdog proof.** Deliberately stall the control task — a breakpoint with the `DBGMCU` freeze off, or
+   a temporary `vTaskDelay` inside the cycle — and confirm the board resets. A watchdog nobody has seen
+   fire is not a watchdog.
+5. **Ten-minute soak, Disabled.** Read `RobotState::maxCycleTimeUs` and `overrunTotal` through a debugger
+   watch or the console. Criterion: `overrunTotal == 0`, and `maxCycleTimeUs` **non-zero** — a zero here
+   means U0.8 item 2 did not take and the soak proved nothing.
+6. **Sizing.** `uxTaskGetStackHighWaterMark()` on all four tasks, then right-size `configTOTAL_HEAP_SIZE`
+   from the measurements rather than leaving it at an unvalidated 64 KB. §11 wants >= 20 % headroom.
+   Phase 1 adds no tasks, so these figures stay good.
+7. **`nSLEEP` out of reset — a schematic question.** `Motor` drives `nSLEEP` as a GPIO and `Motor::init()`
+   is the first thing to hold it low; a reset reverts the pin to an input, so between reset and
+   `Motor::init()` the bridge state is decided by the board, not by firmware. Confirm there is a
+   pull-down. **If that line floats, a watchdog reset is not a coast — and the fix is a board change,
+   not a firmware one, so settle it before phase 1 rather than after.**
+
+Close the phase-0 rows in §10.1 with what this sweep produced.
+
 ---
 
 ## 4. Phase 1 — Raw drive (the MVP)
@@ -303,6 +427,14 @@ now even though only `Open` is implemented, so phase 3 fills in a branch rather 
 Call `Encoder::setDirection()` with the sign of the commanded duty each cycle, before `Encoder::update()`
 — a single-channel encoder cannot determine direction on its own.
 
+**Expose the readings `sense()` needs.** `SensorFrame::encoderCounts`, `encoderVelocityRpm`,
+`motorCurrentMa` and `motorFaulted` are all still unwritten — `ControlTask::sense()` fills only the
+battery fields today, which means **`SafetyMonitor`'s motor-fault trigger is inert code and the §5.2
+row cannot fire.** Invariant 2 gives this subsystem those four drivers exclusively, so nothing else may
+construct a second `Motor` to read them. Give `DriveBase` const query methods covering all four arrays,
+indexed by `SensorFrame::kChannelLeft` / `kChannelRight`. U1.5 wires them into `sense()`; this unit only
+has to make them reachable.
+
 ### U1.4 — Teleop behavior and robot config
 
 | | |
@@ -326,7 +458,20 @@ Use designated initializers for anything with more than two fields — this laye
 | **Model** | Stronger — first time the whole stack drives real motors. |
 | **Read** | `app/tactical/main_tactical.cpp`; `app/tactical/tasks/ControlTask.cpp` |
 | **Modifies** | `app/tactical/main_tactical.cpp`; `app/tactical/tasks/ControlTask.cpp` |
-| **Done when** | Sticks drive the robot, **and it coasts to a stop within 250 ms of the transmitter being switched off — tested deliberately, at speed, more than once.** |
+| **Done when** | Sticks drive the robot, **and it coasts to a stop within 250 ms of the transmitter being switched off — tested deliberately, at speed, more than once.** Plus the motor-fault provocation below. |
+
+**Task.** Wire `DriveBase` and `TeleopBehavior` into the control task, and prove the whole stack.
+
+- Fill the four per-channel `SensorFrame` arrays in `sense()` from the `DriveBase` query methods U1.3
+  exposed, retiring the `@todo` in `ControlTask.cpp`. **Until this lands the motor-fault row of §5.2
+  cannot fire at all**, however correct `SafetyMonitor` is.
+- Replace the phase-0 empty `SubsystemManager` with the array `Robot2026` owns, and call
+  `m_behavior->update(ctx)` at step 5 of the cycle.
+
+**Provoke the motor fault deliberately** — stall a motor against a hard stop, or pull `nFAULT` low — and
+confirm it latches Fault, names the channel, and stays latched after the cause clears. §11 requires every
+§5.2 trigger to have been provoked on hardware; this is the only one phase 0 could not reach, because
+nothing wrote `motorFaulted[]` until this unit.
 
 ---
 
