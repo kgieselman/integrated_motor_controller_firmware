@@ -175,6 +175,12 @@ Lower numeric value = higher urgency. The kernel cannot mask 0–4, so nothing a
 FreeRTOS API. All of these must be set explicitly with `HAL_NVIC_SetPriority()` before
 `vTaskStartScheduler()`.
 
+`configureInterruptPriorities()` in `main_tactical.cpp` states this whole table, including the lines
+CubeMX already happens to get right. `cubemx/Core/Src/gpio.c` and `gpdma.c` are regenerated files: a
+priority inherited from one of them is a priority that can change without anyone editing this project.
+Enabling stays with the generated code, so that a line whose driver is not wired yet cannot fire into an
+empty handler.
+
 | Prio | Source | Calls FreeRTOS API |
 |---|---|---|
 | 5 | Motor fault EXTI3 / EXTI7 | Yes — sets a latch, notifies Control |
@@ -262,8 +268,17 @@ behavior code runs.
 | Motor driver fault | EXTI3 / EXTI7 latch (DRV8874 `nFAULT`) | any edge | **Fault**, latched. Names the channel in the message. |
 | Battery sag | `Battery::readMillivolts()` | below cutoff for 200 ms | **Fault**, motors coast. Debounced — a hard launch dips the rail for milliseconds and that is not a flat pack. Cutoff is a stored parameter. |
 | Control overrun | DWT cycle counter | > 4 ms, 10 consecutive | **Fault**. The cycle is no longer keeping its schedule, so nothing derived from `dt` can be trusted. |
-| Control task stall | liveness counter, checked by `Heartbeat` | no advance in 50 ms | IWDG is not refreshed → hardware reset. The one path that survives the control task itself wedging. |
-| Stack overflow / malloc failure | FreeRTOS hooks | — | Record the task name to EEPROM, then reset. The reason survives and prints on the next boot. |
+| Control task stall | liveness counter, checked by `Heartbeat` | no advance in 50 ms | IWDG is not refreshed → hardware reset in ≤ 500 ms. The one path that survives the control task itself wedging. |
+| Stack overflow / malloc failure | FreeRTOS hooks | — | The IWDG resets the board — the hooks spin with interrupts disabled, which does not stop an LSI-clocked counter. Recording the task name to EEPROM so the reason survives the reset is phase 2. |
+
+**The watchdog, concretely.** `platform/Watchdog.hpp` starts the IWDG from `main()` as the last statement
+before `vTaskStartScheduler()`, at a 500 ms reload (LSI /128, 125 counts) and frozen under debug. The
+refresh is gated on the control task's liveness counter inside `HeartbeatTask`, so it is a statement about
+the 200 Hz cycle rather than about the scheduler. Two numbers set the reload: `Heartbeat` runs at 100 ms
+(§3.1), so the stall row's 50 ms threshold is really detected at one-to-two-tick granularity, and one of
+those ticks may contain a blocking 60 ms chirp — 260 ms worst case, doubled for margin. Anyone lengthening
+the heartbeat period or the chirp has to revisit `Watchdog::kReloadMs`, and anyone shortening the reload
+should remember it is also how long a wedged robot holds its last duty cycle on the H-bridges.
 
 ### 5.3 Safe is a state, not a check
 
@@ -665,13 +680,25 @@ target, every driver compiled for the first time, the layout co-located and the 
 | IPROPI sense resistor contradiction | Resolved: **1.6 kΩ**, confirmed against the schematic, so `kDefaultRIpropi` was right and the Doxygen was wrong. Scale is 0.8 V/A, so the sense saturates at ≈4.125 A (`Motor::kCurrentFullScaleMa`) — stall detection must read full scale as "at least this much", never as a measurement. |
 | Battery reports flat at boot | `adcDmaIsRunning()` now gates it; `isLow()` returns false until there is a real measurement. |
 
+**Closed 2026-09-01 (U0.9 part A):**
+
+| Was | Resolution |
+|---|---|
+| **The IWDG was never started.** `HeartbeatTask`'s liveness gate wrote a correct reload key to a counter that was not running, so §5.2's stall row — the one failsafe that survives the control task wedging — did nothing. | `platform/Watchdog.hpp/.cpp`: `watchdogStart()` enables the LSI, sets /128 and 125 counts for a 500 ms reload, freezes the counter under debug via `DBGMCU`, and starts it as the last statement in `main()` before the scheduler. `watchdogRefresh()` replaces the register write inside the gate; the gate logic is unchanged. Sizing is justified in §5.2 and in the header. This also closes the reset half of the stack-overflow row for free. |
+| **ISR priorities inherited from generated files.** The EXTI lines took their priority from `cubemx/Core/Src/gpio.c`, which put IMU INT1 at 5 rather than §3.3's 7, and which a regeneration can change silently. | `configureInterruptPriorities()` now asserts EXTI3 / EXTI7 at 5 and EXTI2 at 7 alongside the UART rows. Priority only — enabling stays with the generated code. Whether the band actually holds is still a bench question (below). |
+
 **Still open:**
 
 | Phase | Issue |
 |---|---|
-| 0 | **ISR priorities — the lines not yet wired.** Closed for the console and the CRSF path: `configureInterruptPriorities()` now sets USART1, UART4 and GPDMA1_Channel1 to priority 6 and enables USART1 and GPDMA1_Channel1 (`cubemx/Core/Src/gpdma.c` also enables the DMA line, at priority 8, so that one is a re-assertion rather than a missing enable). What is left is the motor fault EXTI3 / EXTI7 lines at 5 and the IMU INT1 EXTI2 line at 7, each added by the phase that wires its driver. Confirming the band actually holds is part of U0.9's bench sweep. |
-| 0 | **Nothing has run on hardware.** The FreeRTOS baseline, `Led`, `Buzzer` and the relocated `Console` compile but have never executed. This is U0.9: flash and confirm the heartbeat, the boot chirp, the console banner and — now that USART1_IRQHandler() exists — a command typed back at it, before building on top of them. |
-| 0 | **Heap sizing.** `configTOTAL_HEAP_SIZE` is still an unvalidated 64 KB. Right-size it from `uxTaskGetStackHighWaterMark()` once the task set is real. |
+| 0 | **Nothing has run on hardware.** Every row below is a U0.9 part-B bench question, and phase 1 is gated on the starred ones. The FreeRTOS baseline, `Led`, `Buzzer`, the relocated `Console` and now the watchdog all compile and have never executed. |
+| 0 | First light: boot chirp, console banner, and a typed character echoed back — the proof that `USART1_IRQHandler()` took. Then §5.4: LED_0 slow in Disabled, LED_1 following the receiver within 250 ms, LED_2 dark. |
+| 0 | ★ **Which switch is the kill switch.** `InputSource::kChannelEnable` is `5U` and `CRSFReceiver::channelUs()` takes a 0–15 index, so it should be the transmitter's CH6 — unless the receiver disagrees. Flip switches until LED_0 changes pattern, then record the convention in `InputSource.hpp` and in §5.2. No at-speed kill test means anything until this is settled. |
+| 0 | ★ **Watchdog proof.** Stall the control task deliberately — a breakpoint with the `DBGMCU` freeze cleared, or a temporary `vTaskDelay` inside the cycle — and confirm the board resets. A watchdog nobody has seen fire is not a watchdog. |
+| 0 | Ten-minute soak in Disabled: `overrunTotal == 0` and `maxCycleTimeUs` **non-zero**. A zero there means the control task's DWT counter did not take and the soak proved nothing. |
+| 0 | **Heap sizing.** `configTOTAL_HEAP_SIZE` is still an unvalidated 64 KB. Right-size it and the four stack depths from `uxTaskGetStackHighWaterMark()` during the soak; §11 wants ≥ 20 % headroom. Phase 1 adds no tasks, so the figures stay good. |
+| 0 | Confirm the §3.3 priority band actually holds on the board, now that `configureInterruptPriorities()` asserts every row of it. |
+| 0 | ★ **`nSLEEP` out of reset — a schematic question.** `Motor` drives `nSLEEP` as a GPIO and `Motor::init()` is the first thing to hold it low; reset reverts the pin to an input, so between reset and `Motor::init()` the bridge state is the board's decision, not the firmware's. Confirm there is a pull-down. If that line floats, a watchdog reset is not a coast — and the fix is a board change, not a firmware one. |
 | 2 | **P10** — the VBAT divider ratio (4.333) is unconfirmed. Measure it before the brownout threshold means anything. |
 | 2 | **F3** — `Console`'s line buffer is shared between the RX ISR and the console task with no protection. Acceptable while it is diagnostics-only; must be fixed before `ParamStore` trusts it. |
 | 3 | **Encoder calibration unknown.** `pulsesPerRev` and `timerClockHz` are caller-supplied, and nothing has verified which encoders are actually fitted. |

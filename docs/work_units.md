@@ -72,7 +72,7 @@ Pick the model from this column. The rationale is in §2.
 | **U0.6** | Stronger | ✅ Done | U0.1–U0.5 | Task set and integration |
 | **U0.7** | Cheaper | ✅ Done | U0.6 | Indicators and watchdog |
 | **U0.8** | Stronger | ✅ Done | U0.1–U0.7 | Pre-flash corrections — console RX, DWT ownership, doc drift |
-| **U0.9** | Stronger | Blocked on U0.8 | U0.8 | First light, IWDG bring-up, and the phase-0 bench sweep |
+| **U0.9** | Stronger | ⚠️ Part A done — bench sweep outstanding | U0.8 | First light, IWDG bring-up, and the phase-0 bench sweep |
 | **U1.1** | Stronger | Ready *(parallel with phase 0)* | — | Host test harness |
 | **U1.2a** | Cheaper | Blocked on U1.1 | U1.1 | `ExpoCurve` |
 | **U1.2b** | Cheaper | Blocked on U1.1 | U1.1 | `SlewRateLimiter` |

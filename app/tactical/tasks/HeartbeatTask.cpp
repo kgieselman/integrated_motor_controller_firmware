@@ -19,10 +19,10 @@
 #include "tasks/Tasks.hpp"
 
 #include "platform/SafetyMonitor.hpp"
+#include "platform/Watchdog.hpp"
 
 extern "C"
 {
-#include "stm32h5xx_hal.h"
 #include "FreeRTOS.h"
 #include "task.h"
 }
@@ -73,20 +73,6 @@ static constexpr uint8_t kChirpsOnFault = 2U;
 /// Ticks between repetitions of the fault pattern. Ten is one second - often
 /// enough that nobody misses it, rarely enough that nobody unplugs the board.
 static constexpr uint32_t kFaultChirpPeriodTicks = 10U;
-
-/*******************************************************************************
- * @brief Independent watchdog key-register values (RM0481 §41.4.1).
- *
- * Accessed as registers rather than through the HAL because HAL_IWDG_MODULE is
- * not enabled in cubemx/Core/Inc/stm32h5xx_hal_conf.h. The key register is
- * write-only and needs no read-modify-write, so the driver would buy nothing
- * here; the CMSIS IWDG definition comes in with stm32h5xx_hal.h above.
- ******************************************************************************/
-namespace IwdgKey
-{
-  /// Written to IWDG_KR to reload the down-counter from IWDG_RLR.
-  static constexpr uint32_t kReload = 0x0000AAAAU;
-} // namespace IwdgKey
 
 /* Task-owned objects --------------------------------------------------------*/
 
@@ -256,18 +242,13 @@ static void updateBuzzer(const RobotState& state, uint32_t tick)
  * @note §5.2 specifies the stall threshold as "no advance in 50 ms". This task
  *       runs at 100 ms (§3.1), so the real detection granularity is one to two
  *       heartbeat ticks. The IWDG reload period is what sets the actual reset
- *       delay, and it must be long enough to tolerate two heartbeat ticks plus
- *       the blocking chirp inside one.
+ *       delay: Watchdog::kReloadMs is 500 ms, sized for exactly that worst case
+ *       plus the blocking chirp that can land inside one of those ticks.
  *
- * @warning The IWDG is NOT started anywhere in this firmware yet. It is absent
- *          from the CubeMX .ioc, HAL_IWDG_MODULE_ENABLED is commented out in
- *          stm32h5xx_hal_conf.h, and no MX_IWDG_Init() exists. Until boot code
- *          enables the LSI, writes IWDG_PR/IWDG_RLR, starts the counter
- *          (IWDG_KR = 0xCCCC) and freezes it under debug (DBGMCU_APB1FZR), this
- *          write lands on a counter that is not running and no stall causes a
- *          reset. That bring-up belongs in main_tactical.cpp and the .ioc, both
- *          outside unit U0.7's blast radius. The gate below is correct now, so
- *          enabling the watchdog is the only step left.
+ * @note The counter is started by watchdogStart() in main(), immediately before
+ *       the scheduler. If that call failed, LED_2 is lit at boot and this
+ *       refresh is a write to a counter that is not running - the gate is still
+ *       correct, but no stall resets the board.
  */
 static void refreshWatchdogIfControlAlive(const RobotState& state)
 {
@@ -277,7 +258,7 @@ static void refreshWatchdogIfControlAlive(const RobotState& state)
   }
 
   s_lastLiveness = state.liveness;
-  IWDG->KR       = IwdgKey::kReload;
+  watchdogRefresh();
 }
 
 /* Task ----------------------------------------------------------------------*/

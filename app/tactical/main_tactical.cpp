@@ -44,6 +44,7 @@ extern "C"
 #include "AdcDma.hpp"
 #include "Buzzer.hpp"
 #include "Led.hpp"
+#include "platform/Watchdog.hpp"
 #include "tasks/CommsTask.hpp"
 #include "tasks/ControlTask.hpp"
 #include "tasks/HeartbeatTask.hpp"
@@ -65,6 +66,17 @@ static void configureInterruptPriorities(void);
 /// 5-14; the kernel cannot mask 0-4. Six is the row
 /// docs/tactical_architecture.md §3.3 assigns to the CRSF path.
 static constexpr uint32_t kUartIrqPriority = 6U;
+
+/// NVIC priority for the DRV8874 nFAULT lines on EXTI3 and EXTI7. The top of
+/// the kernel-maskable band, per docs/tactical_architecture.md §3.3: a motor
+/// driver reporting overcurrent is the most urgent thing this board can be
+/// told, and its handler latches a fault and notifies the control task.
+static constexpr uint32_t kMotorFaultIrqPriority = 5U;
+
+/// NVIC priority for the IMU data-ready line on EXTI2. §3.3 puts it below the
+/// CRSF path deliberately - a late IMU sample degrades a heading estimate,
+/// while a late CRSF frame delays the failsafe.
+static constexpr uint32_t kImuIrqPriority = 7U;
 
 /* Board hardware ------------------------------------------------------------*/
 
@@ -148,6 +160,20 @@ int main(void)
     // with, say, no failsafe, so stop here instead.
     s_ledFault.on();
     Error_Handler();
+  }
+
+  // Last statement before the scheduler, deliberately. Started any earlier and
+  // the whole init sequence above would have to finish inside one reload
+  // period, for no benefit: nothing up to here loops, so nothing up to here can
+  // wedge in the way a watchdog exists to catch. From this line on, a control
+  // task that stops advancing its liveness counter resets the board in
+  // Watchdog::kReloadMs - see docs/tactical_architecture.md §5.2.
+  //
+  // A failure here is the §5.2 stall row silently not being armed, which is
+  // worth a light but not worth refusing to boot over.
+  if (!watchdogStart())
+  {
+    s_ledFault.on();
   }
 
   vTaskStartScheduler();
@@ -247,8 +273,15 @@ static void initPeripherals(void)
  * prioritised or enabled, and USART1_IRQHandler() in stm32h5xx_it_tactical.c is
  * the only thing standing between HAL_UART_Receive_IT() and Default_Handler.
  *
- * @todo Extend to the motor fault EXTI lines (priority 5) and the IMU INT line
- *       (priority 7) as those drivers are wired in.
+ * The three EXTI lines are re-asserted rather than inherited. cubemx/Core/Src/
+ * gpio.c already enables all three and already happens to put the motor faults
+ * at 5, which is the row §3.3 wants - but that file is CubeMX-owned, a
+ * regeneration can change any of it silently, and EXTI2 is at 5 there rather
+ * than at the 7 §3.3 assigns. Stating the whole policy here means the band the
+ * kernel depends on is readable in one place and cannot drift underneath it.
+ * Enabling stays gpio.c's job; these lines set priority only, because a line
+ * enabled here whose driver has not been wired yet would fire into a handler
+ * with nothing behind it.
  */
 static void configureInterruptPriorities(void)
 {
@@ -259,6 +292,11 @@ static void configureInterruptPriorities(void)
 
   HAL_NVIC_SetPriority(GPDMA1_Channel1_IRQn, kUartIrqPriority, 0U);
   HAL_NVIC_EnableIRQ(GPDMA1_Channel1_IRQn);
+
+  HAL_NVIC_SetPriority(EXTI3_IRQn, kMotorFaultIrqPriority, 0U);
+  HAL_NVIC_SetPriority(EXTI7_IRQn, kMotorFaultIrqPriority, 0U);
+
+  HAL_NVIC_SetPriority(EXTI2_IRQn, kImuIrqPriority, 0U);
 }
 
 /**
