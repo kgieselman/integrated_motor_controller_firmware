@@ -34,9 +34,14 @@ bool Buzzer::init()
 
   // Confirm the counter actually advances before trusting a busy-wait against
   // it. On a part where DWT is unavailable, waitCycles() would never return.
+  //
+  // The counter is deliberately NOT volatile: incrementing a volatile is
+  // deprecated under C++20 and draws -Wvolatile. __NOP() is an asm volatile, so
+  // the loop body cannot be optimised away and the loop survives without it.
   const uint32_t first = DWT->CYCCNT;
-  for (volatile uint32_t i = 0U; i < 16U; ++i)
+  for (uint32_t i = 0U; i < 16U; ++i)
   {
+    __NOP();
   }
   m_ready = (DWT->CYCCNT != first);
 

@@ -37,6 +37,13 @@ set(MX_Defines_Syms
 # ---------------------------------------------------------------------------
 # Include paths (HAL + CMSIS)
 # ---------------------------------------------------------------------------
+# Consumed with the SYSTEM keyword everywhere below, so these compile as
+# -isystem and GCC suppresses warnings raised inside them. ST's headers are
+# CubeMX-owned and regenerated - stm32h5xx_hal_pcd.h alone raises three
+# -Wvolatile warnings in every translation unit that includes stm32h5xx_hal.h,
+# which is all of them - so an edit there would be lost and the noise buries
+# warnings in code we actually own. Project include paths stay plain -I and
+# keep full -Wall.
 set(MX_Include_Dirs
     ${CUBEMX_DIR}/Core/Inc
     ${CUBEMX_DIR}/Drivers/STM32H5xx_HAL_Driver/Inc
@@ -80,7 +87,7 @@ set(STM32_Drivers_Src
 
 add_library(STM32_Drivers OBJECT)
 target_sources(STM32_Drivers PRIVATE ${STM32_Drivers_Src})
-target_include_directories(STM32_Drivers PUBLIC ${MX_Include_Dirs})
+target_include_directories(STM32_Drivers SYSTEM PUBLIC ${MX_Include_Dirs})
 target_compile_definitions(STM32_Drivers PUBLIC ${MX_Defines_Syms})
 
 # ---------------------------------------------------------------------------
@@ -162,8 +169,8 @@ set(IMC_Drivers_Src
 # -Wl,--gc-sections are already set, so an executable pulls in only the
 # drivers it actually references.
 add_library(imc_drivers STATIC ${IMC_Drivers_Src})
+target_include_directories(imc_drivers SYSTEM PUBLIC ${MX_Include_Dirs})
 target_include_directories(imc_drivers PUBLIC
-    ${MX_Include_Dirs}
     ${CMAKE_SOURCE_DIR}/drivers
 )
 target_compile_definitions(imc_drivers PUBLIC ${MX_Defines_Syms})
@@ -193,8 +200,8 @@ target_sources(imc_tactical PRIVATE
     ${MX_Periph_Src}
     ${APP_Tactical_Src}
 )
+target_include_directories(imc_tactical SYSTEM PRIVATE ${MX_Include_Dirs})
 target_include_directories(imc_tactical PRIVATE
-    ${MX_Include_Dirs}
     ${CMAKE_SOURCE_DIR}/app/tactical          # application headers, beside their sources
     ${CMAKE_SOURCE_DIR}/app/tactical/include  # FreeRTOSConfig.h only — a build artifact,
                                               # not an application header

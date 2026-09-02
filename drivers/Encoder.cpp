@@ -73,7 +73,12 @@ void Encoder::onCapture()
 
   m_lastCapture   = now;
   m_lastCaptureMs = HAL_GetTick();
-  ++m_pulseCount;
+
+  // Explicit read-modify-write rather than ++. Incrementing a volatile is
+  // deprecated under C++20 (-Wvolatile); this compiles to the same load, add
+  // and store, and is safe here because onCapture() is the only writer and it
+  // cannot preempt itself.
+  m_pulseCount = m_pulseCount + 1U;
 }
 
 void Encoder::setDirection(int8_t sign)
