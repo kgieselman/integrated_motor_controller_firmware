@@ -2,7 +2,13 @@
  * @file Motor.hpp
  * @brief DRV8874 H-bridge motor driver wrapper — IN1/IN2 control mode.
  *
- * Wraps one DRV8874 channel operating in IN1/IN2 (independent half-bridge) mode.
+ * Wraps one DRV8874 channel operating in the part's PWM control mode, which is
+ * the mode PMODE = high selects. Note that "PWM mode" and "independent
+ * half-bridge mode" are two DIFFERENT DRV8874 modes and this class uses the
+ * first: PMODE is tri-level, and low / high / Hi-Z select PH-EN, PWM and
+ * independent half-bridge respectively. The distinction matters because in
+ * independent half-bridge mode an input low drives that output LOW rather than
+ * Hi-Z, so the coast row of the truth table below would brake instead.
  * Each motor requires:
  *  - Two PWM-capable TIM channels on the same timer (IN1 and IN2 pins)
  *  - One GPIO output (PMODE pin — driven high to select IN1/IN2 mode)
@@ -21,11 +27,29 @@
  *       motor 0 current-sense input, and driving it as an output destroys the
  *       current sense.
  *
- * IN1/IN2 truth table (PMODE = high on DRV8874):
+ * IN1/IN2 truth table (PWM mode, PMODE = high on DRV8874):
  *  - IN1=PWM, IN2=0     → Forward (speed proportional to duty)
  *  - IN1=0,   IN2=PWM   → Reverse (speed proportional to duty)
  *  - IN1=100%, IN2=100% → Brake (low-side FETs both on, terminals shorted)
  *  - IN1=0,   IN2=0     → Coast  (outputs Hi-Z)
+ *
+ * @warning PMODE is latched on the nSLEEP low->high edge, NOT sampled
+ *          continuously (DRV8874 datasheet §7.3.2). init() therefore drives
+ *          PMODE high BEFORE enable() ever raises nSLEEP, and that ordering is
+ *          load-bearing: raise nSLEEP first and the part latches whatever PMODE
+ *          happened to be, which with the MCU pin still an input is Hi-Z —
+ *          independent half-bridge mode, where coast() brakes. Changing the
+ *          mode afterwards requires a full sleep cycle (nSLEEP low, wait
+ *          t_SLEEP, change PMODE, nSLEEP high).
+ *
+ * @note Board state between reset and init(). Rev A fits a 10 kOhm pull-up to
+ *       +3.3 V on each nSLEEP net (R14 / R19), and nothing external pulls
+ *       PMODE, IN1 or IN2 — those rely on the DRV8874's own 100 kOhm internal
+ *       pulldowns. So at an MCU reset the part stays awake, keeps the PWM mode
+ *       it last latched, sees IN1 = IN2 = 0 and coasts. At a COLD boot it wakes
+ *       with PMODE floating, latches independent half-bridge mode and drives
+ *       both outputs low — a brake — until init() drops nSLEEP. See
+ *       docs/tactical_architecture.md §5.5.
  *
  * @note Compile with -fno-exceptions. All error states are returned as bool or
  *       exposed via isFaulted().

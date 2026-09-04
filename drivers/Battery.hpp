@@ -3,7 +3,8 @@
  * @brief Battery voltage monitor via VBAT_SENSE ADC channel.
  *
  * The Integrated Motor Controller board divides +BATT down to the STM32 ADC range through a
- * resistor divider on PC4 (ADC1_IN4 / VBAT_SENSE, also TP2). The divider
+ * resistor divider on PC4 (ADC1_IN4 / VBAT_SENSE, also test point TP7,
+ * "BATT_DIV"). The divider
  * ratio defaults to kDefaultDividerRatio and can be tuned via the constructor.
  *
  * Pin assignment:
@@ -15,9 +16,12 @@
  * by the ADC1 DMA circular scan.  No HAL polling is performed at read time.
  * See AdcDma.hpp for scan configuration requirements.
  *
- * @warning The divider ratio below is derived from the schematic and has not
- *          been confirmed against a bench measurement (open item P10). Every
- *          voltage this class reports is only as good as that number.
+ * @note The divider ratio below was confirmed against the PCB netlist on
+ *       2026-09-02 (old open item P10): R8 = 100 kOhm from +BATT, R10 = 30 kOhm
+ *       to GND, with a BZT52C3V3 clamp and a 100 nF filter on the tap. The
+ *       nominal ratio is therefore correct. Resistor tolerance still moves it a
+ *       little, so a bench reading against a known supply is worth taking to
+ *       calibrate - pass the measured value to the constructor.
  *
  * @author Integrated Motor Controller firmware team
  ******************************************************************************/
@@ -36,13 +40,11 @@ public:
   /**
    * @brief Default voltage divider ratio: V_battery / V_adc.
    *
-   * Schematic: R_top = 100 kΩ (R7/R9), R_bot = 30 kΩ (R12).
+   * Schematic: R_top = 100 kΩ (R8), R_bot = 30 kΩ (R10).
    * Ratio = (100 kΩ + 30 kΩ) / 30 kΩ = 4.333.
    *
    * Pass a different value to the constructor to tune for real-world resistor
    * tolerances without recompiling.
-   *
-   * @todo Confirm on the bench against a known supply voltage (open item P10).
    */
   static constexpr float kDefaultDividerRatio = 4.333f; ///< (100 kΩ + 30 kΩ) / 30 kΩ
 

@@ -302,6 +302,56 @@ is also what makes the state correct again after a brownout scrambles a PWM regi
 Driven by the heartbeat task from the state snapshot, so they keep telling the truth with the USB console
 unplugged — which, on a competition floor, it always is.
 
+### 5.5 `nSLEEP` out of reset — why a watchdog reset still coasts
+
+Rev A fits a pull-up on both DRV8874 `nSLEEP` nets. That is the opposite of what the failsafe design
+assumed, so the chain is worth stating once, in full, rather than rediscovering it.
+
+At any MCU reset every pin of a motor channel reverts to a floating input: `nSLEEP`, `PMODE`, `IN1`
+and `IN2`. What the bridge then does is decided by three DRV8874 facts:
+
+- `EN/IN1` and `PH/IN2` each carry a **100 kΩ internal pulldown**, so both fall to 0 with the MCU
+  pins undriven.
+- `PMODE` is a **tri-level** input: low selects PH/EN mode, high selects PWM (IN1/IN2) mode, and
+  **Hi-Z selects independent half-bridge mode** — a different mode with a different truth table, in
+  which an input low drives that output **low** rather than Hi-Z.
+- `PMODE` is **latched on the `nSLEEP` low→high edge**, not sampled continuously.
+
+**Watchdog reset, mid-drive — coast.** The pull-up holds `nSLEEP` high straight through the reset, so
+the part never sleeps, so `PMODE` is never re-latched and the device stays in the PWM mode that
+`Motor::enable()` last latched. `IN1` and `IN2` fall to 0 on their own pulldowns, and PWM mode reads
+`nSLEEP=1, IN1=0, IN2=0 → Hi-Z, Hi-Z → Coast`. §5.2's stall row therefore delivers what it promises.
+Note the coast is a consequence of the part *staying awake*: it is the absence of a sleep cycle, not
+the pull-up itself, that saves it.
+
+**Cold boot — a brake, briefly.** From VM rising until `Motor::init()` drives `nSLEEP` low, `nSLEEP`
+is high and `PMODE` floats, so the device latches **independent half-bridge** mode with both inputs
+low: both low-side FETs on, motor terminals shorted. Milliseconds with the robot stationary, so
+harmless — but on phase-0 firmware, where no `Motor` is ever constructed, that state persists for as
+long as the board is powered.
+
+**Pull-up value — CHECKED against the PCB netlist 2026-09-02, and it is fine.** The coast argument
+needs `nSLEEP` to read an unambiguous high at reset. Rev A fits **R14 (motor 0) and R19 (motor 1),
+both 10 kΩ to +3.3 V**, and each `MOT_n_ENABLE` net has exactly three nodes — the resistor, the MCU
+pin, and the DRV8874 — so nothing else drives either net. Against the part's 100 kΩ internal pulldown
+a 10 kΩ pull-up divides to **≈3.0 V**, comfortably above V_IH. There is no indeterminate region and
+therefore no spurious `nSLEEP` edge to re-latch `PMODE`. Had the pull-up been ~100 kΩ it would have
+divided to ≈1.65 V, sat on the threshold, and every chattering edge would have re-latched `PMODE`
+while it floats — dropping the part into independent half-bridge mode and shorting a spinning motor
+across its low-side FETs. It is not, so that failure mode is closed.
+
+**The cold-boot brake is confirmed, not hypothetical.** Both `MOT_n_MODE` nets have exactly two nodes
+(MCU pin and DRV8874 pin 16) — there is no strapping resistor on `PMODE` at all — and both
+`MOT_n_IN_1` / `MOT_n_IN_2` nets are likewise two-node, so the inputs depend entirely on the part's
+own internal pulldowns. Every pin of a motor channel is therefore floating or internally pulled
+whenever the MCU is in reset, exactly as assumed above.
+
+**Consequence for `Motor`.** The ordering inside `Motor::init()` — `PMODE` driven high *before*
+`enable()` raises `nSLEEP` — is load-bearing, because that edge is what latches the mode. Moving the
+`PMODE` write after `enable()` would leave the part in independent half-bridge mode, where `coast()`
+brakes. `Motor.hpp` and `Motor.cpp` currently mislabel PMODE-high as "IN1/IN2 (independent
+half-bridge) mode"; those are two different modes and the comment needs correcting.
+
 ---
 
 ## 6. The Subsystem Contract
@@ -679,6 +729,7 @@ target, every driver compiled for the first time, the layout co-located and the 
 | `Drivetrain` documents ENABLE as PA4 | Removed from the build (§10.2). PA4 is `LEFT_MOTOR_IPROPI` — following that example would have configured an analog input as a push-pull output. |
 | IPROPI sense resistor contradiction | Resolved: **1.6 kΩ**, confirmed against the schematic, so `kDefaultRIpropi` was right and the Doxygen was wrong. Scale is 0.8 V/A, so the sense saturates at ≈4.125 A (`Motor::kCurrentFullScaleMa`) — stall detection must read full scale as "at least this much", never as a measurement. |
 | Battery reports flat at boot | `adcDmaIsRunning()` now gates it; `isLow()` returns false until there is a real measurement. |
+| **P10** — VBAT divider ratio unconfirmed | Confirmed 2026-09-02 against the PCB netlist: R8 = 100 kΩ from `+BATT`, R10 = 30 kΩ to GND, tap on PC4 (ADC1_IN4), with a BZT52C3V3 clamp and a 100 nF filter. Ratio is **(100 + 30) / 30 = 4.3333**, so `Battery::kDefaultDividerRatio = 4.333f` is right. The `@warning` in `Battery.hpp` saying it is unverified is now stale. Resistor tolerance still moves it a little, so a bench reading is worth taking for calibration — but the ratio is no longer an unknown. |
 
 **Closed 2026-09-01 (U0.9 part A):**
 
@@ -692,14 +743,13 @@ target, every driver compiled for the first time, the layout co-located and the 
 | Phase | Issue |
 |---|---|
 | 0 | **Nothing has run on hardware.** Every row below is a U0.9 part-B bench question, and phase 1 is gated on the starred ones. The FreeRTOS baseline, `Led`, `Buzzer`, the relocated `Console` and now the watchdog all compile and have never executed. |
-| 0 | First light: boot chirp, console banner, and a typed character echoed back — the proof that `USART1_IRQHandler()` took. Then §5.4: LED_0 slow in Disabled, LED_1 following the receiver within 250 ms, LED_2 dark. |
+| 0 | First light: boot chirp, console banner, and a typed character echoed back — the proof that `USART1_IRQHandler()` took. **The console is USART1 at 115200 8N1 on PB14/PB15 (AF4), brought out to the J5 "UART" growth header** — that header is the Rev A console, which is what the connector-shortage note in §3.1 is really describing. Then §5.4: LED_0 slow in Disabled, LED_1 following the receiver within 250 ms, LED_2 dark. |
 | 0 | ★ **Which switch is the kill switch.** `InputSource::kChannelEnable` is `5U` and `CRSFReceiver::channelUs()` takes a 0–15 index, so it should be the transmitter's CH6 — unless the receiver disagrees. Flip switches until LED_0 changes pattern, then record the convention in `InputSource.hpp` and in §5.2. No at-speed kill test means anything until this is settled. |
 | 0 | ★ **Watchdog proof.** Stall the control task deliberately — a breakpoint with the `DBGMCU` freeze cleared, or a temporary `vTaskDelay` inside the cycle — and confirm the board resets. A watchdog nobody has seen fire is not a watchdog. |
 | 0 | Ten-minute soak in Disabled: `overrunTotal == 0` and `maxCycleTimeUs` **non-zero**. A zero there means the control task's DWT counter did not take and the soak proved nothing. |
 | 0 | **Heap sizing.** `configTOTAL_HEAP_SIZE` is still an unvalidated 64 KB. Right-size it and the four stack depths from `uxTaskGetStackHighWaterMark()` during the soak; §11 wants ≥ 20 % headroom. Phase 1 adds no tasks, so the figures stay good. |
 | 0 | Confirm the §3.3 priority band actually holds on the board, now that `configureInterruptPriorities()` asserts every row of it. |
-| 0 | ★ **`nSLEEP` out of reset — a schematic question.** `Motor` drives `nSLEEP` as a GPIO and `Motor::init()` is the first thing to hold it low; reset reverts the pin to an input, so between reset and `Motor::init()` the bridge state is the board's decision, not the firmware's. Confirm there is a pull-down. If that line floats, a watchdog reset is not a coast — and the fix is a board change, not a firmware one. |
-| 2 | **P10** — the VBAT divider ratio (4.333) is unconfirmed. Measure it before the brownout threshold means anything. |
+| 0 | ✅ **`nSLEEP` out of reset — CLOSED 2026-09-02 from the PCB netlist, see §5.5.** Rev A fits a 10 kΩ pull-up (R14 / R19) on the two `nSLEEP` nets. A watchdog reset still coasts, for a non-obvious reason worth reading before phase 1. No board change needed. Cold boot brakes for a few ms, which is harmless. |
 | 2 | **F3** — `Console`'s line buffer is shared between the RX ISR and the console task with no protection. Acceptable while it is diagnostics-only; must be fixed before `ParamStore` trusts it. |
 | 3 | **Encoder calibration unknown.** `pulsesPerRev` and `timerClockHz` are caller-supplied, and nothing has verified which encoders are actually fitted. |
 | — | **CI exists** (`.github/workflows/ci.yml`: Docker build, Debug all-targets, Release, cppcheck, ELF/map artifacts). Its `imc_bringup` release step was removed 2026-08-30 when that target went away. Worth adding a host-side unit-test job when `control/` lands in phase 3. |

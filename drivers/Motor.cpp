@@ -47,11 +47,18 @@ Motor::Motor(TIM_HandleTypeDef* pwmTimer,
 
 bool Motor::init()
 {
-  // PMODE = high selects IN1/IN2 (independent half-bridge) mode on DRV8874.
+  // PMODE = high selects the DRV8874's PWM (IN1/IN2) control mode. PMODE is
+  // tri-level: low is PH-EN, high is PWM, Hi-Z is independent half-bridge -
+  // a different mode in which an input low drives that output LOW, so coast()
+  // would brake. THIS WRITE MUST STAY AHEAD OF THE FIRST nSLEEP RISE: the part
+  // latches PMODE on the nSLEEP low->high edge, so enable() is what commits the
+  // mode, and reordering these two lines silently selects the wrong one.
   HAL_GPIO_WritePin(m_pmodePort, m_pmodePin, GPIO_PIN_SET);
 
   // nSLEEP low: the bridge stays powered down until enable() is called, so
-  // init() on its own can never produce motion.
+  // init() on its own can never produce motion. On Rev A this also ends the
+  // cold-boot window in which the board's 10k nSLEEP pull-up had the part awake
+  // with PMODE floating - see the @note in Motor.hpp.
   HAL_GPIO_WritePin(m_enablePort, m_enablePin, GPIO_PIN_RESET);
   m_enabled = false;
 
@@ -76,6 +83,8 @@ bool Motor::init()
 
 void Motor::enable()
 {
+  // This edge is also what latches PMODE (see init()). m_pmodePort is held high
+  // continuously from init() onward, so every wake re-latches the same PWM mode.
   HAL_GPIO_WritePin(m_enablePort, m_enablePin, GPIO_PIN_SET);
   m_enabled = true;
 }
