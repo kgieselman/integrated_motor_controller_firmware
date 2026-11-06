@@ -42,6 +42,50 @@ static Console s_console(&huart1);
 /// Single-byte staging buffer for interrupt-driven receive.
 static uint8_t s_rxByte = 0U;
 
+/* Console commands ----------------------------------------------------------*/
+
+/**
+ * @brief "status": print what the control cycle last published.
+ *
+ * Read-only. Uses the same RobotState snapshot the heartbeat task uses, so it
+ * shows exactly what the indicators are acting on. The raw USB_DETECTED pin
+ * level is read here directly, as a diagnostic, because RobotState does not
+ * carry it and its polarity is still to be confirmed on the bench.
+ */
+static void cmdStatus(Console& console, int argc, char* argv[])
+{
+  (void)argc;
+  (void)argv;
+
+  const RobotState st = controlTaskRobotState().read();
+
+  const char* modeText = "unknown";
+  switch (st.mode)
+  {
+    case ControlMode::Disabled: modeText = "Disabled"; break;
+    case ControlMode::Teleop:   modeText = "Teleop";   break;
+    case ControlMode::Auto:     modeText = "Auto";     break;
+    case ControlMode::Fault:    modeText = "Fault";    break;
+    default:                    break;
+  }
+
+  console.printf("mode      : %s\r\n", modeText);
+  console.printf("reason    : %s%s\r\n",
+                 SafetyMonitor::reasonToString(st.reason),
+                 st.faultLatched ? " (latched)" : "");
+  console.printf("battery   : %lu mV (%s)\r\n",
+                 static_cast<unsigned long>(st.batteryMillivolts),
+                 st.batteryValid ? "valid" : "not valid");
+  console.printf("usb pin   : %d (PA15 raw level)\r\n",
+                 static_cast<int>(HAL_GPIO_ReadPin(USB_DETECTED_GPIO_Port, USB_DETECTED_Pin)));
+  console.printf("link age  : %lu ms\r\n", static_cast<unsigned long>(st.linkAgeMs));
+  console.printf("cycle     : %lu us (max %lu us, overruns %lu)\r\n",
+                 static_cast<unsigned long>(st.cycleTimeUs),
+                 static_cast<unsigned long>(st.maxCycleTimeUs),
+                 static_cast<unsigned long>(st.overrunTotal));
+  console.printf("liveness  : %lu\r\n", static_cast<unsigned long>(st.liveness));
+}
+
 /* Task ----------------------------------------------------------------------*/
 
 /**
@@ -62,6 +106,10 @@ static uint8_t s_rxByte = 0U;
 static void telemetryTaskEntry(void* pvParameters)
 {
   (void)pvParameters;
+
+  static_cast<void>(s_console.registerCommand("status",
+                                              "Mode, fault reason, battery, cycle stats",
+                                              cmdStatus));
 
   s_console.printAbout();
   s_console.printHelp();

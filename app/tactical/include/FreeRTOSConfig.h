@@ -93,7 +93,9 @@ extern uint32_t SystemCoreClock;
  * -------------------------------------------------------------------------*/
 #define vPortSVCHandler     SVC_Handler
 #define xPortPendSVHandler  PendSV_Handler
-#define xPortSysTickHandler SysTick_Handler
+/* SysTick_Handler is NOT mapped here: the M33 port names its handler SysTick_Handler,
+ * so CMakeLists.txt renames it to xPortSysTickHandler inside port.c, and
+ * stm32h5xx_it_tactical.c defines SysTick_Handler in front of it. */
 
 /* ---------------------------------------------------------------------------
  * Optional API includes

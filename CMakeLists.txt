@@ -142,6 +142,14 @@ set(FREERTOS_HEAP 4                           CACHE STRING "FreeRTOS heap implem
 
 FetchContent_MakeAvailable(freertos_kernel)
 
+# V11 ships the Cortex-M33 port with its tick handler named SysTick_Handler. HAL_Init()
+# starts SysTick long before the scheduler, and that handler dereferences task lists
+# that do not exist until the first xTaskCreate(), so it faulted (null read in
+# xTaskIncrementTick). Rename it inside port.c only; SysTick_Handler is then
+# defined in app/tactical/stm32h5xx_it_tactical.c, which feeds the HAL tick until
+# the scheduler runs and then calls xPortSysTickHandler().
+target_compile_definitions(freertos_kernel_port PRIVATE SysTick_Handler=xPortSysTickHandler)
+
 # ---------------------------------------------------------------------------
 # Library: imc_drivers
 # Hand-written hardware drivers, shared by every application target.

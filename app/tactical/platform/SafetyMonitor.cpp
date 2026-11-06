@@ -168,7 +168,12 @@ bool SafetyMonitor::updateBatterySag(uint32_t nowMs, const SensorFrame& sensors)
   // batteryValid is the SensorFrame mirror of Battery::isValid(). Until the ADC1
   // DMA scan is running the buffer reads a plausible 0 mV, so a failsafe that
   // ignores this flag latches a brownout on every power-up.
+  // USB present with no pack on the rail is a bench board, not a brownout.
+  const bool benchPower = sensors.usbPresent
+                       && (sensors.batteryMillivolts < kNoBatteryMv);
+
   const bool belowCutoff = sensors.batteryValid
+                        && !benchPower
                         && (sensors.batteryMillivolts < m_batteryCutoffMv);
 
   if (!belowCutoff)

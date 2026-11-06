@@ -154,6 +154,11 @@ struct SensorFrame
   /// A failsafe that ignores this latches a brownout on every power-up.
   bool batteryValid = false;
 
+  /// True while USB power is present (the USB_DETECTED input, PA15). Used only
+  /// to recognise a bench board that is powered over USB with no battery
+  /// connected - see SafetyMonitor::kNoBatteryMv. False until sensed.
+  bool usbPresent = false;
+
   /// Per-channel motor current in milliamps, or kCurrentUnavailableMa.
   /// MAGNITUDE ONLY - IPROPI cannot report direction, so this is never negative
   /// except for the sentinel; take the sign from the commanded duty instead.

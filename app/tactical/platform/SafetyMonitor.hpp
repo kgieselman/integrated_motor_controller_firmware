@@ -103,6 +103,22 @@ public:
   static constexpr uint32_t kDefaultBatteryCutoffMv = 9900U;
 
   /**
+   * @brief Battery reading below which no pack is considered connected, in mV.
+   *
+   * With USB present AND the battery rail below this, the board is on a bench
+   * powered over USB with no pack, and the sag check is skipped: there is no
+   * pack to protect and no motor supply to cut.
+   *
+   * USB back-feeds the battery rail on this board: with no pack, the VBAT sense
+   * measured 4493 mV on the bench (about 5 V less a diode drop). 5500 mV sits
+   * above the highest USB back-feed and below any 3S pack, even a dead one, so a
+   * real battery can never be mistaken for "no battery".
+   * USB alone does NOT disable the check - a robot on its pack with a laptop
+   * plugged in still faults on a flat battery.
+   */
+  static constexpr uint32_t kNoBatteryMv = 5500U;
+
+  /**
    * @brief How long the pack must stay below cutoff before it is a fault, in ms.
    *
    * Debounced because a hard launch dips the rail for milliseconds and that is

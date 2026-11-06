@@ -222,7 +222,16 @@ void Console::printAbout()
   println("  Integrated Motor Controller");
   println("  MCU  : STM32H563  @ 250 MHz (Cortex-M33)");
   println("  Build: " __DATE__ " " __TIME__ " UTC");
-  println("  Port : UART4 @ 420000 baud (CRSF connector)");
+  const char* portName = "UART";
+  if (m_uart->Instance == USART1)
+  {
+    portName = "USART1";
+  }
+  else if (m_uart->Instance == UART4)
+  {
+    portName = "UART4";
+  }
+  printf("  Port : %s @ %lu baud\r\n", portName, static_cast<unsigned long>(m_uart->Init.BaudRate));
   println("-----------------------------------");
 }
 

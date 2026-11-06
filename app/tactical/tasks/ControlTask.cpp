@@ -17,6 +17,7 @@
 
 extern "C"
 {
+#include "main.h"
 #include "stm32h5xx_hal.h"
 #include "FreeRTOS.h"
 #include "task.h"
@@ -50,6 +51,12 @@ static constexpr float kControlPeriodSeconds = 0.005f;
 /// board-level: no mechanism owns the battery, and sense() is the only code in
 /// the cycle permitted to read hardware (§4 step 1).
 static Battery s_battery;
+
+/// Polarity of the USB_DETECTED input (PA15, LQFP64 pin 50). Assumed active high
+/// (VBUS present drives it high) - confirm against the schematic. A wrong value
+/// is harmless: it only stops the bench-power exemption in SafetyMonitor from
+/// engaging, and a real battery on the rail is never exempted anyway.
+static constexpr bool kUsbDetectedActiveHigh = true;
 
 /// The failsafe gate consulted at step 3 of every cycle.
 static SafetyMonitor s_safety;
@@ -187,6 +194,8 @@ static uint32_t cyclesToMicroseconds(uint32_t cycles)
  */
 static void sense(SensorFrame& frame)
 {
+  frame.usbPresent = (HAL_GPIO_ReadPin(USB_DETECTED_GPIO_Port, USB_DETECTED_Pin)
+                      == (kUsbDetectedActiveHigh ? GPIO_PIN_SET : GPIO_PIN_RESET));
   frame.batteryValid      = s_battery.isValid();
   frame.batteryMillivolts = s_battery.readMillivolts();
 }
